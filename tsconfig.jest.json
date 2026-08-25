@@ -1,0 +1,29 @@
+{
+    "compilerOptions": {
+        "target": "esnext",
+        "module": "esnext",
+        "moduleResolution": "node",
+        "esModuleInterop": true,
+        "jsx": "react-jsx",
+        "allowJs": true,
+        "skipLibCheck": true,
+        "verbatimModuleSyntax": false,
+        "types": [
+            "node",
+            "jest",
+            "@testing-library/jest-dom",
+            "vite/client"
+        ],
+        "paths": {
+            "@/*": [
+                "./src/*"
+            ]
+        },
+        "noEmit": true
+    },
+    "include": [
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "jest.setup.ts"
+    ]
+}
