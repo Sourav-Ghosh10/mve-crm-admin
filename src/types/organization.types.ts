@@ -123,6 +123,7 @@ export interface PaginatedResponse<T> {
 
 export interface LeaveType {
     _id: string;
+    id?: string;
     name: string;
     code: string;
     description?: string;
@@ -133,6 +134,10 @@ export interface LeaveType {
     maxCarryForward: number;
     resetFrequency: 'monthly' | 'yearly';
     isActive: boolean;
+    accrualType?: 'fixed' | 'hourly';
+    annualEntitlement?: number;
+    workingHoursPerDay?: number;
+    hourlyAccrualRate?: number;
     deletedAt?: string | null;
     createdAt?: string;
     updatedAt?: string;
@@ -149,6 +154,10 @@ export interface LeaveTypeInput {
     maxCarryForward: number;
     resetFrequency: 'monthly' | 'yearly';
     isActive: boolean;
+    accrualType?: 'fixed' | 'hourly';
+    annualEntitlement?: number;
+    workingHoursPerDay?: number;
+    hourlyAccrualRate?: number;
 }
 
 export interface BreakType {

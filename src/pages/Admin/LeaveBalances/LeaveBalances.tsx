@@ -78,7 +78,7 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
             setIsSavingModal(true);
             await leaveService.addOpeningBalance({
                 employeeId: selectedUser._id || selectedUser.id,
-                leaveTypeId: modalData.leaveTypeId,
+                leaveType: modalData.leaveTypeId,
                 amount: modalData.amount,
                 description: modalData.description || 'Opening balance manually added by Admin'
             });

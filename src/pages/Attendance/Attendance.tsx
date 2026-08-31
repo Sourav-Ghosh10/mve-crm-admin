@@ -894,7 +894,7 @@ const Attendance: React.FC = () => {
 
             {/* Early Leaves Panel */}
             {activeTab === ('early_leaves' as any) && (
-                <EarlyLeaves />
+                <div />
             )}
             
             {/* Live Map Panel */}

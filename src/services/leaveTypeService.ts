@@ -49,15 +49,11 @@ export const leaveTypeService = {
 
     delete: async (id: string): Promise<void> => {
         // Soft delete: deactivate the leave type instead of permanently deleting
-        await api.patch(`/leave-types/${id}/status`, {
-            isActive: false
-        });
+        await api.put(`/leave-types/${id}`, { isActive: false });
     },
 
     toggleStatus: async (id: string, isActive: boolean): Promise<LeaveType> => {
-        const response = await api.patch<Record<string, unknown>>(`/leave-types/${id}/status`, {
-            isActive
-        });
+        const response = await api.put<Record<string, unknown>>(`/leave-types/${id}`, { isActive });
         const result = response.data?.data || response.data;
         return result as LeaveType;
     }

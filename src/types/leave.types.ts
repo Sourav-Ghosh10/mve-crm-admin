@@ -31,6 +31,11 @@ export interface LeaveRequest {
                     lastName: string;
                 };
             };
+            workingHours?: {
+                startTime: string;
+                endTime: string;
+                weeklyOff: string[];
+            };
         };
     };
     leaveType: LeaveType;
@@ -57,6 +62,7 @@ export interface LeaveBalanceDetails {
     currentBalance: number | null;
     totalAllocated: number | null;
     isPaid: boolean;
+    workingHoursPerDay?: number;
 }
 
 export interface EmployeeLeaveBalanceResponse {
