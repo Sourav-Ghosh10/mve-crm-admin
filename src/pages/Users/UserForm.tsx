@@ -81,6 +81,7 @@ const baseSchema = yup.object({
     profilePicture: yup.string().trim().url("Invalid URL"),
     phone: yup.string().trim(),
     dateOfBirth: yup.string(),
+    panNumber: yup.string().trim().uppercase().max(20),
     address: yup.object({
       street: yup.string().trim(),
       city: yup.string().trim(),
@@ -368,6 +369,22 @@ const PersonalCard: React.FC<CardProps> = ({ control }) => (
           control={control}
           render={({ field, fieldState: { error } }) => (
             <Input {...field} label="Date of Birth" type="date" error={!!error} helperText={error?.message} className="rounded-xl" />
+          )}
+        />
+        <Controller
+          name="personalInfo.panNumber"
+          control={control}
+          render={({ field, fieldState: { error } }) => (
+            <Input
+              {...field}
+              label="PAN Number"
+              placeholder="e.g. DWBPM6152D"
+              error={!!error}
+              helperText={error?.message}
+              className="rounded-xl uppercase"
+              maxLength={20}
+              onChange={(e) => field.onChange(e.target.value.toUpperCase().trim())}
+            />
           )}
         />
       </div>
@@ -1100,6 +1117,7 @@ const UserForm: React.FC<UserFormProps> = ({
         email: initialValues?.personalInfo?.email || "",
         phone: initialValues?.personalInfo?.phone || "",
         dateOfBirth: initialValues?.personalInfo?.dateOfBirth ? new Date(initialValues.personalInfo.dateOfBirth).toISOString().split('T')[0] : "",
+        panNumber: initialValues?.personalInfo?.panNumber || "",
         address: {
           street: initialValues?.personalInfo?.address?.street || "",
           city: initialValues?.personalInfo?.address?.city || "",
@@ -1288,6 +1306,7 @@ const UserForm: React.FC<UserFormProps> = ({
       personalInfo: {
         ...data.personalInfo,
         dateOfBirth: data.personalInfo.dateOfBirth ? new Date(data.personalInfo.dateOfBirth).toISOString() : undefined,
+        panNumber: data.personalInfo.panNumber ? data.personalInfo.panNumber.trim().toUpperCase() : undefined,
         address: data.personalInfo.address,
         emergencyContact: data.personalInfo.emergencyContact
       },

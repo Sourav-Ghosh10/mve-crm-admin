@@ -381,6 +381,12 @@ const UserList: React.FC = () => {
               </div>
               <div className="text-xs font-medium text-foreground-tertiary flex items-center gap-2">
                 <span className="bg-muted px-1.5 py-0.5 rounded-md border border-border/50">{row.employeeId}</span>
+                {row.personalInfo?.panNumber && (
+                  <>
+                    <span className="opacity-30">•</span>
+                    <span className="bg-muted px-1.5 py-0.5 rounded-md border border-border/50 font-mono text-[10px]">PAN: {row.personalInfo.panNumber}</span>
+                  </>
+                )}
                 <span className="opacity-30">•</span>
                 <span className="truncate max-w-[150px]">{row.personalInfo.email}</span>
               </div>

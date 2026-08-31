@@ -30,6 +30,7 @@ export interface User {
     profilePicture?: string;
     phone?: string;
     dateOfBirth?: string;
+    panNumber?: string;
     address?: {
       street?: string;
       city?: string;

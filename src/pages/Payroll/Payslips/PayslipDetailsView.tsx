@@ -478,6 +478,7 @@ const PayslipDetailsView: React.FC<PayslipDetailsViewProps> = ({
                   : "-",
               ],
               ["Email Address", employeeData?.personalInfo?.email || "-"],
+              ["PAN Number", employeeData?.personalInfo?.panNumber || "-"],
               [
                 "Annual CTC",
                 `Rs. ${(Number(payslip.monthlyCTC || 0) * 12).toFixed(2)}`,
