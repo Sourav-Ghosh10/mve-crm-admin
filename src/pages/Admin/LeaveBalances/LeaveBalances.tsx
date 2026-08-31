@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { User as UserIcon, Calendar, Briefcase, ArrowLeft, Search, X } from "lucide-react";
+import { User as UserIcon, Calendar, Briefcase, ArrowLeft, Search, X, Edit2 } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/common/Card";
 import { userService } from "../../../services/userService";
@@ -25,17 +25,139 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
     const [error, setError] = useState<string | null>(null);
     const [leaveTypesForModal, setLeaveTypesForModal] = useState<LeaveType[]>([]);
 
-    // Modal state
+    // Modal state for Add Opening Balance
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [modalData, setModalData] = useState({ leaveTypeId: '', amount: 0, description: '' });
+    const [modalData, setModalData] = useState<{
+        leaveTypeId: string;
+        amount: string | number;
+        hours: string | number;
+        description: string;
+    }>({ leaveTypeId: '', amount: '', hours: '', description: '' });
     const [isSavingModal, setIsSavingModal] = useState(false);
+
+    // Modal state for Adjust Balance
+    const [adjustModal, setAdjustModal] = useState<{
+        isOpen: boolean;
+        leaveType: LeaveBalanceDetails | null;
+        days: string | number;
+        hours: string | number;
+    }>({ isOpen: false, leaveType: null, days: '', hours: '' });
+    const [isSavingAdjust, setIsSavingAdjust] = useState(false);
+
+    const getWorkingHoursPerDay = useCallback((leaveTypeId: string) => {
+        if (!leaveTypeId) return 8;
+        const lt = leaveTypesForModal.find(t => (t._id || t.id || t.name) === leaveTypeId)
+            || detailedBalances.find(b => (b.leaveTypeId || b.code || b.name) === leaveTypeId);
+        return (lt && 'workingHoursPerDay' in lt && lt.workingHoursPerDay) ? lt.workingHoursPerDay : 8;
+    }, [leaveTypesForModal, detailedBalances]);
+
+    const handleLeaveTypeChange = (val: string) => {
+        const rate = getWorkingHoursPerDay(val);
+        setModalData(prev => {
+            let newHours = prev.hours;
+            if (prev.amount !== '' && !isNaN(Number(prev.amount))) {
+                const daysNum = Number(prev.amount);
+                newHours = Number((daysNum * rate).toFixed(2));
+            }
+            return {
+                ...prev,
+                leaveTypeId: val,
+                hours: newHours
+            };
+        });
+    };
+
+    const handleDaysChange = (val: string) => {
+        const rate = getWorkingHoursPerDay(modalData.leaveTypeId);
+        if (val === '') {
+            setModalData(prev => ({ ...prev, amount: '', hours: '' }));
+            return;
+        }
+        const days = parseFloat(val);
+        const hrs = !isNaN(days) ? Number((days * rate).toFixed(2)) : '';
+        setModalData(prev => ({ ...prev, amount: val, hours: hrs }));
+    };
+
+    const handleHoursChange = (val: string) => {
+        const rate = getWorkingHoursPerDay(modalData.leaveTypeId);
+        if (val === '') {
+            setModalData(prev => ({ ...prev, amount: '', hours: '' }));
+            return;
+        }
+        const hrs = parseFloat(val);
+        const days = !isNaN(hrs) && rate > 0 ? Number((hrs / rate).toFixed(4)) : '';
+        setModalData(prev => ({ ...prev, hours: val, amount: days }));
+    };
+
+    const handleOpenModal = () => {
+        setIsModalOpen(true);
+        setModalData({ leaveTypeId: '', amount: '', hours: '', description: '' });
+    };
+
+    const handleOpenAdjustModal = (type: LeaveBalanceDetails) => {
+        const rate = type.workingHoursPerDay || 8;
+        const userBal = selectedUser?.leaveBalance?.[type.name];
+        const currDays = (type.currentBalance !== null && type.currentBalance !== undefined && type.currentBalance !== 0)
+            ? type.currentBalance
+            : (userBal !== undefined && userBal !== null)
+                ? userBal
+                : (type.currentBalance ?? (type as any).available ?? (type.totalAllocated ?? 0));
+        const numDays = Number(currDays) || 0;
+        const currHours = Number((numDays * rate).toFixed(2));
+        setAdjustModal({
+            isOpen: true,
+            leaveType: type,
+            days: Number(numDays.toFixed(4)),
+            hours: currHours,
+        });
+    };
+
+    const handleSaveAdjust = async () => {
+        if (!selectedUser || !adjustModal.leaveType) return;
+        const numDays = typeof adjustModal.days === 'string' ? parseFloat(adjustModal.days) : adjustModal.days;
+        if (isNaN(numDays) || numDays < 0) {
+            toast.error("Please enter a valid balance amount (0 or greater)");
+            return;
+        }
+        try {
+            setIsSavingAdjust(true);
+            const uid = selectedUser._id || selectedUser.id;
+            const leaveTypeName = adjustModal.leaveType.name;
+            const leaveTypeId = adjustModal.leaveType.leaveTypeId || adjustModal.leaveType.code || leaveTypeName;
+
+            await Promise.allSettled([
+                leaveService.updateEmployeeBalance(uid, {
+                    [leaveTypeName]: numDays
+                }),
+                leaveService.addOpeningBalance({
+                    employeeId: uid,
+                    leaveType: leaveTypeId,
+                    amount: numDays,
+                    description: `Balance adjusted to ${numDays} days by Admin`
+                })
+            ]);
+
+            toast.success(`Balance for ${leaveTypeName} updated to ${numDays} days (${Number((numDays * (adjustModal.leaveType.workingHoursPerDay || 8)).toFixed(2))} hours)!`);
+            setAdjustModal({ isOpen: false, leaveType: null, days: '', hours: '' });
+            await loadBalances(selectedUser);
+        } catch (err) {
+            console.error("Failed to update balance:", err);
+            toast.error("Failed to update leave balance.");
+        } finally {
+            setIsSavingAdjust(false);
+        }
+    };
 
     const loadBalances = useCallback(async (user: User) => {
         try {
             const uid = user._id || user.id;
-            const data = await leaveService.getEmployeeBalance(uid);
-            // API returns { status:'success', data:{ balances:[...] } }
-            // leaveService returns response.data.data => { balances:[...] }
+            const [data, freshUser] = await Promise.all([
+                leaveService.getEmployeeBalance(uid).catch(() => null),
+                userService.getById(uid).catch(() => null)
+            ]);
+            if (freshUser) {
+                setSelectedUser(freshUser);
+            }
             const balances: LeaveBalanceDetails[] =
                 (data as unknown as { balances: LeaveBalanceDetails[] })?.balances ||
                 [];
@@ -70,22 +192,34 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
     }, [userId, loadBalances]);
 
     const handleSaveOpeningBalance = async () => {
-        if (!selectedUser || !modalData.leaveTypeId || modalData.amount <= 0) {
-            toast.error("Please fill in all required fields");
+        const numericAmount = typeof modalData.amount === 'string' ? parseFloat(modalData.amount) : modalData.amount;
+        if (!selectedUser || !modalData.leaveTypeId || isNaN(numericAmount) || numericAmount < 0) {
+            toast.error("Please fill in all required fields with a valid amount (0 or greater)");
             return;
         }
         try {
             setIsSavingModal(true);
-            await leaveService.addOpeningBalance({
-                employeeId: selectedUser._id || selectedUser.id,
-                leaveType: modalData.leaveTypeId,
-                amount: modalData.amount,
-                description: modalData.description || 'Opening balance manually added by Admin'
-            });
-            toast.success("Opening balance added successfully!");
+            const uid = selectedUser._id || selectedUser.id;
+            const selectedTypeObj = leaveTypesForModal.find(t => (t._id || t.id || t.name) === modalData.leaveTypeId)
+                || detailedBalances.find(b => (b.leaveTypeId || b.code || b.name) === modalData.leaveTypeId);
+            const leaveTypeName = selectedTypeObj?.name || modalData.leaveTypeId;
+
+            await Promise.allSettled([
+                leaveService.addOpeningBalance({
+                    employeeId: uid,
+                    leaveType: modalData.leaveTypeId,
+                    amount: numericAmount,
+                    description: modalData.description || 'Opening balance manually added by Admin'
+                }),
+                leaveService.updateEmployeeBalance(uid, {
+                    [leaveTypeName]: numericAmount
+                })
+            ]);
+
+            toast.success("Opening balance and available balance updated successfully!");
             setIsModalOpen(false);
-            setModalData({ leaveTypeId: '', amount: 0, description: '' });
-            loadBalances(selectedUser);
+            setModalData({ leaveTypeId: '', amount: '', hours: '', description: '' });
+            await loadBalances(selectedUser);
         } catch (err) {
             console.error("Failed to add opening balance:", err);
             toast.error("Failed to add opening balance.");
@@ -178,7 +312,7 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                                 </div>
                                 <CardTitle className="text-xl font-black tracking-tight uppercase">Employee Balances</CardTitle>
                             </div>
-                            <Button size="sm" onClick={() => setIsModalOpen(true)}>+ Add Opening Balance</Button>
+                            <Button size="sm" onClick={handleOpenModal}>+ Add Opening Balance</Button>
                         </CardHeader>
                         <CardContent className="p-0">
                             <div className="overflow-x-auto">
@@ -193,8 +327,13 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                                     </thead>
                                     <tbody className="divide-y divide-border/30">
                                         {detailedBalances.length > 0 ? (
-                                            detailedBalances.map((type) => {
-                                                const current = type.currentBalance ?? 0;
+                                             detailedBalances.map((type) => {
+                                                const userBal = selectedUser?.leaveBalance?.[type.name];
+                                                const current = (type.currentBalance !== null && type.currentBalance !== undefined && type.currentBalance !== 0)
+                                                    ? type.currentBalance
+                                                    : (userBal !== undefined && userBal !== null)
+                                                        ? userBal
+                                                        : (type.currentBalance ?? (type as any).available ?? (type.totalAllocated ?? 0));
                                                 const isUnpaid = !type.isPaid;
 
                                                 return (
@@ -214,7 +353,7 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                                                             </span>
                                                         </td>
                                                         <td className="px-6 py-6 text-center font-black text-sm text-foreground-tertiary">
-                                                            {type.totalAllocated ? `${type.totalAllocated} Days` : "N/A"}
+                                                            {type.totalAllocated ? `${Number(Number(type.totalAllocated).toFixed(2))} Days` : "N/A"}
                                                         </td>
                                                         <td className="px-8 py-6">
                                                             <div className="flex items-center justify-end gap-3">
@@ -229,14 +368,26 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                                                                             </div>
                                                                         ) : (
                                                                             <div className="w-full px-4 py-2 text-right bg-muted/20 border border-border/30 rounded-2xl font-black text-sm text-foreground">
-                                                                                {current} Days
+                                                                                {Number(Number(current).toFixed(2))} Days
                                                                                 <div className="text-xs text-foreground-tertiary mt-0.5">
-                                                                                    {Number((current * (type.workingHoursPerDay || 8)).toFixed(2))} Hours
+                                                                                    {Number((Number(current) * (type.workingHoursPerDay || 8)).toFixed(2))} Hours
                                                                                 </div>
                                                                             </div>
                                                                         )}
                                                                     </div>
                                                                 </div>
+                                                                {!isUnpaid && (
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        onClick={() => handleOpenAdjustModal(type)}
+                                                                        className="h-9 px-3 text-xs flex items-center gap-1.5 rounded-xl border-border/60 hover:border-primary/50 hover:bg-primary/5 shadow-none"
+                                                                        title="Adjust or set balance"
+                                                                    >
+                                                                        <Edit2 className="w-3.5 h-3.5 text-primary" />
+                                                                        <span>Adjust</span>
+                                                                    </Button>
+                                                                )}
                                                             </div>
                                                         </td>
                                                     </tr>
@@ -257,6 +408,7 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                 </div>
             </div>
 
+            {/* Add Opening Balance Modal */}
             {isModalOpen && (
                 <Modal 
                     open={isModalOpen} 
@@ -274,24 +426,150 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                             label="Leave Type"
                             required
                             value={modalData.leaveTypeId}
-                            onChange={(val) => setModalData(prev => ({ ...prev, leaveTypeId: val }))}
+                            onChange={handleLeaveTypeChange}
                             options={modalOptions}
                             placeholder="Select Leave Type"
                         />
-                        <Input
-                            type="number"
-                            label="Amount (Days)"
-                            required
-                            min={0}
-                            value={modalData.amount}
-                            onChange={(e) => setModalData(prev => ({ ...prev, amount: parseFloat(e.target.value) || 0 }))}
-                        />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <Input
+                                type="number"
+                                step="any"
+                                label="Amount (Days)"
+                                required
+                                min={0}
+                                value={modalData.amount}
+                                onChange={(e) => handleDaysChange(e.target.value)}
+                                placeholder="0"
+                            />
+                            <Input
+                                type="number"
+                                step="any"
+                                label="Amount (Hours)"
+                                min={0}
+                                value={modalData.hours}
+                                onChange={(e) => handleHoursChange(e.target.value)}
+                                placeholder="0"
+                                helperText={`1 Day = ${getWorkingHoursPerDay(modalData.leaveTypeId)} Hours`}
+                            />
+                        </div>
+                        <div className="flex gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="text-xs rounded-xl"
+                                onClick={() => {
+                                    setModalData(prev => ({ ...prev, amount: 0, hours: 0 }));
+                                }}
+                            >
+                                ⚡ Set to 0 Hours (0 Days)
+                            </Button>
+                        </div>
                         <TextArea
                             label="Description (Optional)"
                             value={modalData.description}
                             onChange={(e) => setModalData(prev => ({ ...prev, description: e.target.value }))}
                             rows={2}
+                            placeholder="e.g. Initial balance"
                         />
+                    </div>
+                </Modal>
+            )}
+
+            {/* Adjust Balance Modal */}
+            {adjustModal.isOpen && adjustModal.leaveType && (
+                <Modal
+                    open={adjustModal.isOpen}
+                    onClose={() => setAdjustModal({ isOpen: false, leaveType: null, days: '', hours: '' })}
+                    title={`Adjust Balance: ${adjustModal.leaveType.name}`}
+                    actions={
+                        <div className="flex gap-2 w-full justify-end">
+                            <Button variant="outline" onClick={() => setAdjustModal({ isOpen: false, leaveType: null, days: '', hours: '' })}>
+                                Cancel
+                            </Button>
+                            <Button onClick={handleSaveAdjust} isLoading={isSavingAdjust}>
+                                Update Balance
+                            </Button>
+                        </div>
+                    }
+                >
+                    <div className="space-y-4">
+                        <div className="p-3.5 rounded-2xl bg-muted/30 border border-border/30 flex items-center justify-between">
+                            <div>
+                                <span className="text-[10px] font-black uppercase text-foreground-tertiary tracking-widest block">Leave Type</span>
+                                <span className="text-sm font-black text-foreground">{adjustModal.leaveType.name}</span>
+                            </div>
+                            <div className="text-right">
+                                <span className="text-[10px] font-black uppercase text-foreground-tertiary tracking-widest block">Current Balance</span>
+                                <span className="text-sm font-bold text-foreground">
+                                    {Number(Number(adjustModal.leaveType.currentBalance ?? 0).toFixed(2))} Days ({Number(((adjustModal.leaveType.currentBalance ?? 0) * (adjustModal.leaveType.workingHoursPerDay || 8)).toFixed(2))}h)
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <Input
+                                type="number"
+                                step="any"
+                                label="New Balance (Days)"
+                                required
+                                min={0}
+                                value={adjustModal.days}
+                                onChange={(e) => {
+                                    const rate = adjustModal.leaveType?.workingHoursPerDay || 8;
+                                    const val = e.target.value;
+                                    if (val === '') {
+                                        setAdjustModal(prev => ({ ...prev, days: '', hours: '' }));
+                                    } else {
+                                        const d = parseFloat(val);
+                                        setAdjustModal(prev => ({
+                                            ...prev,
+                                            days: val,
+                                            hours: !isNaN(d) ? Number((d * rate).toFixed(2)) : ''
+                                        }));
+                                    }
+                                }}
+                                placeholder="0"
+                            />
+                            <Input
+                                type="number"
+                                step="any"
+                                label="New Balance (Hours)"
+                                required
+                                min={0}
+                                value={adjustModal.hours}
+                                onChange={(e) => {
+                                    const rate = adjustModal.leaveType?.workingHoursPerDay || 8;
+                                    const val = e.target.value;
+                                    if (val === '') {
+                                        setAdjustModal(prev => ({ ...prev, days: '', hours: '' }));
+                                    } else {
+                                        const h = parseFloat(val);
+                                        setAdjustModal(prev => ({
+                                            ...prev,
+                                            hours: val,
+                                            days: !isNaN(h) && rate > 0 ? Number((h / rate).toFixed(4)) : ''
+                                        }));
+                                    }
+                                }}
+                                placeholder="0"
+                                helperText={`1 Day = ${adjustModal.leaveType.workingHoursPerDay || 8} Hours`}
+                            />
+                        </div>
+
+                        <div className="flex gap-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="text-xs rounded-xl"
+                                onClick={() => {
+                                    setAdjustModal(prev => ({ ...prev, days: 0, hours: 0 }));
+                                }}
+                            >
+                                ⚡ Set to 0 Hours (0 Days)
+                            </Button>
+                        </div>
                     </div>
                 </Modal>
             )}
@@ -435,10 +713,10 @@ const LeaveBalancesList: React.FC = () => {
                                                 ) : val !== undefined ? (
                                                     <div className="flex flex-col items-center">
                                                         <span className="font-bold text-sm bg-primary/10 text-primary px-2 py-1 rounded-md">
-                                                            {val}
+                                                            {Number(Number(val).toFixed(2))}
                                                         </span>
                                                         <span className="text-[10px] text-foreground-tertiary mt-1">
-                                                            {Number((val * (lt.workingHoursPerDay || 8)).toFixed(2))}h
+                                                            {Number((Number(val) * (lt.workingHoursPerDay || 8)).toFixed(2))}h
                                                         </span>
                                                     </div>
                                                 ) : (

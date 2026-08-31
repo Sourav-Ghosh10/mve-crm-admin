@@ -1,16 +1,19 @@
-import React, { useRef, useState, useEffect } from "react";
+import React, { useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { useSelector } from "react-redux";
 import Modal from "../../../components/common/Modal/Modal";
 import type { Payslip } from "../../../services/payrollService";
 import type { RootState } from "../../../store/store";
 import { locationService } from "../../../services/locationService";
 import payrollService from "../../../services/payrollService";
+import { leaveService } from "../../../services/leaveService";
+import type { LeaveRequest, LeaveBalanceDetails } from "../../../types/leave.types";
 import type { OfficeLocation } from "../../../types/organization.types";
 import Button from "../../../components/common/Button/Button";
 import { Printer, Download, Mail } from "lucide-react";
 import { format } from "date-fns";
 import signatureLogo from "../../../assets/codecit-logo.png";
 import systemSettingsService from "../../../services/systemSettingsService";
+import { cn } from "../../../lib/utils";
 
 interface PayslipDetailsViewProps {
   isOpen: boolean;
@@ -28,6 +31,8 @@ const PayslipDetailsView: React.FC<PayslipDetailsViewProps> = ({
   const [, setOfficeLocation] = useState<OfficeLocation | null>(null);
   const [signatureImage, setSignatureImage] = useState<string | null>(null);
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [leaveBalances, setLeaveBalances] = useState<LeaveBalanceDetails[]>([]);
+  const [leaveRecords, setLeaveRecords] = useState<LeaveRequest[]>([]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const employeeData = payslip.employeeId as any;
@@ -88,11 +93,65 @@ const PayslipDetailsView: React.FC<PayslipDetailsViewProps> = ({
       }
     };
 
+    const fetchLeaveData = async () => {
+      const empId =
+        employeeData?._id ||
+        employeeData?.id ||
+        (typeof payslip.employeeId === "string" ? payslip.employeeId : "");
+      if (!empId) return;
+
+      try {
+        const [balanceRes, requestsRes] = await Promise.allSettled([
+          leaveService.getEmployeeBalance(empId),
+          leaveService.getRequests({
+            userId: empId,
+            status: "approved",
+            limit: 100,
+          }),
+        ]);
+
+        if (balanceRes.status === "fulfilled" && balanceRes.value) {
+          const balances =
+            (balanceRes.value as { balances?: LeaveBalanceDetails[] })
+              ?.balances || [];
+          setLeaveBalances(balances);
+        }
+
+        if (requestsRes.status === "fulfilled" && requestsRes.value) {
+          const reqs = requestsRes.value.data || [];
+          const startOfMonth = new Date(payslip.year, payslip.month - 1, 1);
+          const endOfMonth = new Date(
+            payslip.year,
+            payslip.month,
+            0,
+            23,
+            59,
+            59,
+            999,
+          );
+
+          const monthReqs = reqs.filter((r) => {
+            const reqStart = new Date(r.startDate);
+            const reqEnd = new Date(r.endDate);
+            return (
+              (reqStart >= startOfMonth && reqStart <= endOfMonth) ||
+              (reqEnd >= startOfMonth && reqEnd <= endOfMonth) ||
+              (reqStart <= startOfMonth && reqEnd >= endOfMonth)
+            );
+          });
+          setLeaveRecords(monthReqs);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch leave details for payslip:", err);
+      }
+    };
+
     if (isOpen) {
       fetchLocation();
       fetchSignature();
+      fetchLeaveData();
     }
-  }, [isOpen, locationId]);
+  }, [isOpen, locationId, employeeData, payslip.employeeId, payslip.month, payslip.year]);
 
   const handlePrint = () => {
     const printContent = printRef.current;
@@ -110,6 +169,7 @@ const PayslipDetailsView: React.FC<PayslipDetailsViewProps> = ({
         <html>
           <head>
             <title>Payslip - ${getMonthName(payslip.month)} ${payslip.year}</title>
+            <script src="https://cdn.tailwindcss.com"></script>
             <style>
               @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
               * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -185,13 +245,16 @@ const PayslipDetailsView: React.FC<PayslipDetailsViewProps> = ({
     }
   };
 
+  const [isDownloading, setIsDownloading] = useState(false);
+
   const handleDownload = async () => {
     try {
+      setIsDownloading(true);
       const blob = await payrollService.downloadPayslipPDF(payslip._id);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Payslip-${getMonthName(payslip.month)}-${payslip.year}.pdf`;
+      a.download = `Payslip-${employeeName.replace(/\s+/g, "_")}-${getMonthName(payslip.month)}-${payslip.year}.pdf`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -199,6 +262,8 @@ const PayslipDetailsView: React.FC<PayslipDetailsViewProps> = ({
     } catch (error) {
       console.error("Failed to download payslip:", error);
       alert("Failed to download payslip. Please try again.");
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -220,6 +285,119 @@ const PayslipDetailsView: React.FC<PayslipDetailsViewProps> = ({
     employeeData?.employment?.designation?.name ||
     employeeData?.employment?.designation ||
     "N/A";
+
+  const getBalanceForType = useCallback(
+    (typeName: string) => {
+      const normalized = (typeName || "")
+        .toLowerCase()
+        .replace(" leave", "")
+        .trim();
+      return leaveBalances.find((b) => {
+        const bName = (b.name || "").toLowerCase().replace(" leave", "").trim();
+        return bName === normalized;
+      });
+    },
+    [leaveBalances],
+  );
+
+  const totalPaidLeaveDays = useMemo(() => {
+    return leaveRecords
+      .filter((r) => getBalanceForType(r.leaveType)?.isPaid !== false)
+      .reduce((sum, r) => sum + (r.numberOfDays ?? (r.halfDay ? 0.5 : 1)), 0);
+  }, [leaveRecords, getBalanceForType]);
+
+  const leaveRows = useMemo(() => {
+    if (leaveRecords.length > 0) {
+      const groups = new Map<string, LeaveRequest[]>();
+      leaveRecords.forEach((req) => {
+        const key = (req.leaveType || "").trim();
+        const existing = groups.get(key) || [];
+        existing.push(req);
+        groups.set(key, existing);
+      });
+
+      return Array.from(groups.entries()).map(([typeName, reqs]) => {
+        const bal = getBalanceForType(typeName);
+        const isPaid = bal
+          ? bal.isPaid !== false
+          : !typeName.toLowerCase().includes("unpaid") &&
+            !typeName.toLowerCase().includes("lop");
+        const hrsPerDay = bal?.workingHoursPerDay || 8;
+
+        const totalDays = reqs.reduce(
+          (sum, r) => sum + (r.numberOfDays ?? (r.halfDay ? 0.5 : 1)),
+          0,
+        );
+        const totalHours = Number((totalDays * hrsPerDay).toFixed(2));
+
+        const sortedReqs = [...reqs].sort(
+          (a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime(),
+        );
+
+        const dateTokens: string[] = [];
+        sortedReqs.forEach((r) => {
+          const sDate = new Date(r.startDate);
+          const eDate = new Date(r.endDate);
+          const startDay = sDate.getDate();
+          const endDay = eDate.getDate();
+
+          if (
+            !r.endDate ||
+            r.startDate === r.endDate ||
+            sDate.toDateString() === eDate.toDateString() ||
+            startDay === endDay
+          ) {
+            dateTokens.push(getOrdinal(startDay));
+          } else {
+            dateTokens.push(`${getOrdinal(startDay)} - ${getOrdinal(endDay)}`);
+          }
+        });
+
+        const dateStr = dateTokens.length > 0 ? dateTokens.join(", ") : "-";
+        const userBal = employeeData?.leaveBalance?.[typeName];
+        const curr = bal?.currentBalance ?? userBal ?? 0;
+
+        return {
+          leaveType: typeName,
+          date: dateStr,
+          noOfDays: Number(Number(totalDays).toFixed(2)),
+          hoursTaken: totalHours,
+          leaveCategory: isPaid ? "Paid Leave" : "Unpaid / LOP",
+          unit: "Days",
+          availableBalance: `${Number(Number(curr).toFixed(2))} Days (${Number((Number(curr) * hrsPerDay).toFixed(2))}h)`,
+        };
+      });
+    }
+
+    if (leaveBalances.length > 0) {
+      return leaveBalances.map((b) => {
+        const hrsPerDay = b.workingHoursPerDay || 8;
+        const userBal = employeeData?.leaveBalance?.[b.name];
+        const curr = b.currentBalance ?? userBal ?? 0;
+        return {
+          leaveType: b.name,
+          date: "-",
+          noOfDays: 0,
+          hoursTaken: 0,
+          leaveCategory: b.isPaid !== false ? "Paid Leave" : "Unpaid / LOP",
+          unit: "Days",
+          availableBalance: `${Number(Number(curr).toFixed(2))} Days (${Number((Number(curr) * hrsPerDay).toFixed(2))}h)`,
+        };
+      });
+    }
+
+    return [
+      {
+        leaveType: payslip.lopDays > 0 ? "Loss of Pay (LOP)" : "Annual Leave",
+        date: "-",
+        noOfDays: payslip.lopDays > 0 ? payslip.lopDays : 0,
+        hoursTaken: payslip.lopDays > 0 ? Number((payslip.lopDays * 8).toFixed(2)) : 0,
+        leaveCategory: payslip.lopDays > 0 ? "Unpaid / LOP" : "Paid Leave",
+        unit: "Days",
+        availableBalance: "0 Days (0h)",
+      },
+    ];
+  }, [leaveRecords, leaveBalances, employeeData, getBalanceForType, payslip.lopDays]);
 
   return (
     <Modal
@@ -251,6 +429,7 @@ const PayslipDetailsView: React.FC<PayslipDetailsViewProps> = ({
             size="sm"
             startIcon={<Download className="w-4 h-4" />}
             onClick={handleDownload}
+            isLoading={isDownloading}
           >
             Download
           </Button>
@@ -315,24 +494,63 @@ const PayslipDetailsView: React.FC<PayslipDetailsViewProps> = ({
           </div>
 
           <SectionTitle>2. ATTENDANCE & LEAVE RECORD</SectionTitle>
-          <div className="grid grid-cols-6 border border-[#d6e0ec] text-[10px] mb-3">
-            {[
-              ["Payable Days", payslip.daysWorked],
-              ["Total Cycle Days", payslip.totalDays],
-              ["LOP Days", payslip.lopDays],
-              ["Paid Leave", "-"],
-              ["Attendance", "Calculated"],
-              ["Leave Balance", "-"],
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                className="border-r border-[#d6e0ec] last:border-r-0 p-2"
-              >
-                <div className="font-bold text-slate-600">{label}</div>
-                <div className="mt-1 font-semibold">{value}</div>
-              </div>
-            ))}
+          <div className="grid grid-cols-4 border border-[#d6e0ec] text-[10px] mb-2 bg-[#f8fafc]">
+            <div className="border-r border-[#d6e0ec] p-1.5 flex justify-between items-center">
+              <span className="font-bold text-slate-600">Payable Days:</span>
+              <span className="font-black text-[#174a7c]">{payslip.daysWorked}</span>
+            </div>
+            <div className="border-r border-[#d6e0ec] p-1.5 flex justify-between items-center">
+              <span className="font-bold text-slate-600">Total Cycle Days:</span>
+              <span className="font-black text-slate-800">{payslip.totalDays}</span>
+            </div>
+            <div className="border-r border-[#d6e0ec] p-1.5 flex justify-between items-center">
+              <span className="font-bold text-slate-600">LOP Days:</span>
+              <span className="font-black text-rose-600">{payslip.lopDays}</span>
+            </div>
+            <div className="p-1.5 flex justify-between items-center">
+              <span className="font-bold text-slate-600">Paid Leave Days:</span>
+              <span className="font-black text-emerald-600">{totalPaidLeaveDays}</span>
+            </div>
           </div>
+
+          <table className="w-full border-collapse border border-[#d6e0ec] mb-3 text-[10px]">
+            <thead>
+              <tr className="bg-[#174a7c] text-white">
+                <th className="p-2 text-left whitespace-nowrap w-[18%]">Leave Type</th>
+                <th className="p-2 text-center whitespace-nowrap w-[24%]">Date</th>
+                <th className="p-2 text-center whitespace-nowrap w-[10%]">No of days</th>
+                <th className="p-2 text-center whitespace-nowrap w-[10%]">Hours Taken</th>
+                <th className="p-2 text-center whitespace-nowrap w-[14%]">Leave Category</th>
+                <th className="p-2 text-center whitespace-nowrap w-[8%]">Unit</th>
+                <th className="p-2 text-right whitespace-nowrap w-[16%]">Available Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leaveRows.map((row, idx) => (
+                <tr key={idx} className="border-t border-[#d6e0ec] hover:bg-slate-50/50">
+                  <td className="p-2 font-bold text-slate-800 align-middle whitespace-nowrap">{row.leaveType}</td>
+                  <td className="p-2 text-center font-medium text-slate-600 align-middle whitespace-nowrap">{row.date}</td>
+                  <td className="p-2 text-center font-bold text-slate-800 align-middle whitespace-nowrap">{row.noOfDays}</td>
+                  <td className="p-2 text-center font-bold text-slate-800 align-middle whitespace-nowrap">{row.hoursTaken}</td>
+                  <td className="p-2 text-center align-middle whitespace-nowrap">
+                    <span
+                      className={cn(
+                        "px-2 py-0.5 rounded text-[9px] font-bold uppercase inline-block whitespace-nowrap",
+                        row.leaveCategory.toLowerCase().includes("unpaid") ||
+                          row.leaveCategory.toLowerCase().includes("lop")
+                          ? "bg-rose-50 text-rose-700 border border-rose-200"
+                          : "bg-emerald-50 text-emerald-700 border border-emerald-200",
+                      )}
+                    >
+                      {row.leaveCategory}
+                    </span>
+                  </td>
+                  <td className="p-2 text-center text-slate-600 font-medium align-middle whitespace-nowrap">{row.unit}</td>
+                  <td className="p-2 text-right font-bold text-[#174a7c] align-middle whitespace-nowrap">{row.availableBalance}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
           <SectionTitle>
             3. MONTHLY SALARY BREAKDOWN & FINANCIAL YEAR YTD (01 APR - 31 MAR)
@@ -509,6 +727,12 @@ function numberToWords(num: number): string {
   };
 
   return convert(num);
+}
+
+function getOrdinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
 export default PayslipDetailsView;
