@@ -84,6 +84,7 @@ export interface AttendanceFilters {
   endDate?: string;
   status?: string;
   userId?: string;
+  employeeId?: string;
   search?: string;
   department?: string;
   designation?: string;

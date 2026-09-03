@@ -57,7 +57,11 @@ const mapAttendance = (item: Record<string, unknown>): Attendance => {
 
 export const attendanceService = {
   getAll: async (params?: AttendanceFilters): Promise<PaginatedAttendanceResponse> => {
-    const response: AxiosResponse = await api.get("/attendance", { params });
+    const finalParams = {
+      ...params,
+      employeeId: params?.employeeId || params?.userId
+    };
+    const response: AxiosResponse = await api.get("/attendance", { params: finalParams });
     const root = response.data;
 
     // Try multiple shapes to be resilient against API variations

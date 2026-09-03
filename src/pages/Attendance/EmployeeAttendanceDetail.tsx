@@ -89,6 +89,7 @@ const EmployeeAttendanceDetail: React.FC = () => {
         queryKey: ["employee-attendance", employeeId, filterType, startDate, endDate, page, limit],
         queryFn: () => attendanceService.getAll({
             userId: employeeId,
+            employeeId: employeeId,
             startDate: startDate,
             endDate: endDate,
             page,
