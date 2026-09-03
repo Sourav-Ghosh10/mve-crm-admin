@@ -10,7 +10,7 @@ interface TimezoneDualViewProps {
     label?: string;
     showDate?: boolean;
     showTime?: boolean;
-    variant?: 'default' | 'minimal';
+    variant?: 'default' | 'minimal' | 'compact';
 }
 
 const TimezoneDualView: React.FC<TimezoneDualViewProps> = ({
@@ -31,14 +31,14 @@ const TimezoneDualView: React.FC<TimezoneDualViewProps> = ({
         ? (showTime ? 'MMM dd, HH:mm' : 'MMM dd, yyyy') 
         : 'hh:mm a';
 
-    let mainStart, mainTZAbbr, mainEnd, subStart, subTZAbbr, subEnd, subLabel;
+    let mainStart: string, mainTZAbbr: string, mainEnd: string | null, subStart: string, subTZAbbr: string, subEnd: string | null, subLabel: string, mainTZ: string, subTZ: string;
 
     try {
         const isEmployeeView = timezoneView === 'employee';
 
         // Define which is main and which is sub based on preference
-        const mainTZ = isEmployeeView ? primaryTimezone : secondaryTimezone;
-        const subTZ = isEmployeeView ? secondaryTimezone : primaryTimezone;
+        mainTZ = isEmployeeView ? primaryTimezone : secondaryTimezone;
+        subTZ = isEmployeeView ? secondaryTimezone : primaryTimezone;
 
         mainStart = formatInTimeZone(start, mainTZ, formatStr);
         mainTZAbbr = formatInTimeZone(start, mainTZ, 'z');
@@ -58,16 +58,23 @@ const TimezoneDualView: React.FC<TimezoneDualViewProps> = ({
         );
     }
 
-    if (variant === 'minimal') {
+    if (variant === 'minimal' || variant === 'compact') {
+        const isSameTimezone = mainTZ === subTZ || mainTZAbbr === subTZAbbr;
         return (
             <div className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-1.5 text-xs font-black text-foreground font-mono">
-                    {mainStart}{mainEnd ? ` - ${mainEnd}` : ''}
-                    <span className="text-[10px] text-primary/70 font-bold tracking-tighter">({mainTZAbbr})</span>
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground font-mono whitespace-nowrap">
+                    <span>{mainStart}{mainEnd ? ` - ${mainEnd}` : ''}</span>
+                    <span className="text-[10px] text-primary/80 font-medium px-1.5 py-0.5 rounded bg-primary/10 tracking-tight font-sans">
+                        {mainTZAbbr}
+                    </span>
                 </div>
-                <div className="flex items-center gap-1 text-[9px] font-medium text-foreground-tertiary italic tracking-tight opacity-70">
-                    {subLabel} {subStart}{subEnd && ` - ${subEnd}`} ({subTZAbbr})
-                </div>
+                {!isSameTimezone && (
+                    <div className="flex items-center gap-1 text-[10px] text-foreground-tertiary tracking-tight whitespace-nowrap">
+                        <span className="opacity-75">{subLabel}</span>
+                        <span className="font-mono">{subStart}{subEnd && ` - ${subEnd}`}</span>
+                        <span className="opacity-75">({subTZAbbr})</span>
+                    </div>
+                )}
             </div>
         );
     }

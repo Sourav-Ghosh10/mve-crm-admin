@@ -11,7 +11,7 @@ import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, isToday } fro
 import { cn } from "../../lib/utils";
 import { attendanceService } from "../../services/attendanceService";
 import { userService } from "../../services/userService";
-import Table, { type Column } from "../../components/common/Table";
+import Table, { type Column } from "../../components/common/Table/Table";
 import type { Attendance } from "../../types/attendance.types";
 import { Card, CardContent } from "../../components/common/Card";
 import Button from "../../components/common/Button";
@@ -41,7 +41,6 @@ const ymdInRangeInclusive = (value: string, start: string, end: string): boolean
     const s = (start || "").slice(0, 10);
     const e = (end || "").slice(0, 10);
     if (!v || !s || !e) return true;
-    // Lexicographic works for YYYY-MM-DD
     return v >= s && v <= e;
 };
 
@@ -109,7 +108,7 @@ const EmployeeAttendanceDetail: React.FC = () => {
             setStartDate(format(startOfMonth(now), "yyyy-MM-dd"));
             setEndDate(format(endOfMonth(now), "yyyy-MM-dd"));
         }
-        setPage(1); // Reset page on filter change
+        setPage(1);
     };
 
     const fadedStatuses = ['absent', 'on-leave', 'leave', 'holiday', 'weekend', 'scheduled'];
@@ -120,13 +119,13 @@ const EmployeeAttendanceDetail: React.FC = () => {
             label: "Date",
             format: (value: unknown, row: Attendance) => (
                 <div className={cn(
-                    "flex flex-col transition-opacity duration-300",
+                    "flex flex-col py-0.5",
                     fadedStatuses.includes(row.status?.toLowerCase()) && "opacity-40"
                 )}>
-                    <span className="font-bold text-foreground">
+                    <span className="font-bold text-xs text-foreground whitespace-nowrap">
                         {format(ymdToLocalDate(String(value || "")), "MMM dd, yyyy")}
                     </span>
-                    <span className="text-[10px] text-foreground-tertiary uppercase font-black tracking-widest">
+                    <span className="text-[10px] text-foreground-tertiary font-medium">
                         {format(ymdToLocalDate(String(value || "")), "EEEE")}
                     </span>
                 </div>
@@ -135,21 +134,22 @@ const EmployeeAttendanceDetail: React.FC = () => {
         {
             _id: "checkIn",
             label: "Check In",
-            format: (value: unknown, employee: Attendance) => {
+            format: (value: unknown, employeeData: Attendance) => {
                 const val = value as { time?: string } | undefined;
                 return (
                     <div className={cn(
-                        "flex items-center gap-2 transition-opacity duration-300",
-                        fadedStatuses.includes(employee.status?.toLowerCase()) && "opacity-40"
+                        "flex items-center transition-opacity duration-200 py-0.5",
+                        fadedStatuses.includes(employeeData.status?.toLowerCase()) && "opacity-40"
                     )}>
                         {val?.time ? (
                             <TimezoneDualView
                                 startTime={val.time}
-                                primaryTimezone={employee?.employeeId?.employment?.timezone || 'Asia/Kolkata'}
+                                primaryTimezone={employeeData?.employeeId?.employment?.timezone || 'Asia/Kolkata'}
                                 secondaryTimezone={getOfficeTimezone()}
+                                variant="compact"
                             />
                         ) : (
-                            <span className="font-mono font-bold text-sm text-foreground-tertiary">--:--</span>
+                            <span className="font-mono font-medium text-xs text-foreground-tertiary">--:--</span>
                         )}
                     </div>
                 );
@@ -163,48 +163,45 @@ const EmployeeAttendanceDetail: React.FC = () => {
                 const checkInLoc = resolveCheckInLocation(row);
 
                 if (!checkInLoc || (!checkInLoc.address && !checkInLoc.latitude)) {
-                    return <span className={cn("text-foreground-tertiary", isFaded && "opacity-40")}>-</span>;
+                    return <span className={cn("text-foreground-tertiary text-xs", isFaded && "opacity-40")}>-</span>;
                 }
 
                 const address = checkInLoc.address;
                 const lat = checkInLoc.latitude;
                 const lng = checkInLoc.longitude;
 
-                if (!address && !lat) return <span className={cn("text-foreground-tertiary", isFaded && "opacity-40")}>-</span>;
+                if (!address && !lat) return <span className={cn("text-foreground-tertiary text-xs", isFaded && "opacity-40")}>-</span>;
 
                 return (
                     <div className={cn(
-                        "flex flex-col gap-1 py-1 transition-opacity duration-300",
+                        "flex items-center gap-1.5 py-0.5 transition-opacity duration-200",
                         isFaded && "opacity-40"
                     )}>
+                        <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
                         {address ? (
                             <a
                                 href={`https://www.google.com/maps/search/?api=1&query=${lat || ''},${lng || ''}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex items-start gap-1 max-w-[150px] hover:text-primary transition-colors group"
-                                title="Click to view on Google Maps"
+                                className="text-xs text-foreground-secondary hover:text-primary transition-colors truncate max-w-[120px]"
+                                title={address}
                                 onClick={(e) => e.stopPropagation()}
                             >
-                                <MapPin className="w-3.5 h-3.5 text-primary flex-shrink-0 mt-0.5 group-hover:scale-110 transition-transform" />
-                                <span className="text-xs text-foreground-secondary leading-normal font-medium line-clamp-1">
-                                    {address}
-                                </span>
+                                {address}
                             </a>
                         ) : lat && lng ? (
                             <a 
                                 href={`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="flex items-center gap-1.5 text-xs text-primary hover:underline font-bold"
+                                className="text-xs text-primary hover:underline font-medium"
                                 title="Click to view on Google Maps"
                                 onClick={(e) => e.stopPropagation()}
                             >
-                                <MapPin className="w-3.5 h-3.5 text-primary" />
-                                <span>{lat.toFixed(4)}, {lng.toFixed(4)}</span>
+                                {lat.toFixed(2)}, {lng.toFixed(2)}
                             </a>
                         ) : (
-                            <span className="text-foreground-tertiary">-</span>
+                            <span className="text-foreground-tertiary text-xs">-</span>
                         )}
                     </div>
                 );
@@ -220,12 +217,12 @@ const EmployeeAttendanceDetail: React.FC = () => {
 
                 return (
                     <div className={cn(
-                        "flex items-center gap-2 transition-opacity duration-300",
+                        "flex items-center transition-opacity duration-200 py-0.5",
                         fadedStatuses.includes(row.status?.toLowerCase()) && "opacity-40"
                     )}>
-                        <div className="relative inline-block group/session">
+                        <div className="inline-flex items-center gap-1.5">
                             {isCurrentlyWorking ? (
-                                <span className="text-primary font-black uppercase tracking-widest text-[9px] bg-primary/10 border border-primary/20 px-2.5 py-1.5 rounded-lg animate-pulse shadow-sm shadow-primary/10">
+                                <span className="text-primary font-bold uppercase tracking-wider text-[9px] bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md animate-pulse">
                                     Working
                                 </span>
                             ) : (row.checkOut?.time || val?.time) ? (
@@ -233,14 +230,15 @@ const EmployeeAttendanceDetail: React.FC = () => {
                                     startTime={row.checkOut?.time || val?.time || ""}
                                     primaryTimezone={employee?.employment?.timezone || 'Asia/Kolkata'}
                                     secondaryTimezone={getOfficeTimezone()}
+                                    variant="compact"
                                 />
                             ) : (
-                                <span className="font-mono font-bold text-sm text-foreground-tertiary">--:--</span>
+                                <span className="font-mono font-medium text-xs text-foreground-tertiary">--:--</span>
                             )}
                             {(row.sessions && row.sessions.length > 1) && !isCurrentlyWorking && (
-                                <div className="absolute -top-1.5 -right-1.5 flex items-center justify-center min-w-[1.2rem] h-4.5 px-1 rounded-full bg-primary text-[9px] font-black text-white shadow-md ring-2 ring-surface z-10">
-                                    {row.sessions.length > 2 ? '2+' : '2'}
-                                </div>
+                                <span className="inline-flex items-center justify-center px-1.5 py-0.2 rounded-full bg-primary/10 text-primary text-[9px] font-bold border border-primary/20" title={`${row.sessions.length} shifts`}>
+                                    {row.sessions.length} shifts
+                                </span>
                             )}
                         </div>
                     </div>
@@ -252,23 +250,21 @@ const EmployeeAttendanceDetail: React.FC = () => {
             label: "Duration",
             format: (_: unknown, row: Attendance) => {
                 const isFaded = fadedStatuses.includes(row.status?.toLowerCase());
+                const durationStr = row.netDurationString || row.totalDurationString || "";
                 const sessions = row.sessions || [];
                 const isCurrentlyWorking = sessions.length > 0 && !sessions[sessions.length - 1].checkOut;
 
-                // Show duration even if shift is ongoing, similar to the main Attendance Log
-                const durationStr = row.netDurationString || row.totalDurationString || "";
-
                 return (
-                    <div className="flex flex-col">
+                    <div className="flex items-center gap-1.5 py-0.5">
                         <span className={cn(
-                            "font-black text-foreground text-sm transition-opacity duration-300 uppercase",
+                            "font-bold text-xs text-foreground font-mono whitespace-nowrap",
                             isFaded && "opacity-40"
                         )}>
                             {durationStr || "-"}
                         </span>
                         {isCurrentlyWorking && !isFaded && (
-                            <span className="text-[10px] text-primary font-black uppercase tracking-tighter animate-pulse">
-                                Working
+                            <span className="text-[9px] text-primary font-bold uppercase tracking-tight animate-pulse">
+                                Active
                             </span>
                         )}
                     </div>
@@ -280,14 +276,12 @@ const EmployeeAttendanceDetail: React.FC = () => {
             label: "Breaks",
             format: (value: unknown, row: Attendance) => {
                 const breaksCount = row.breaks?.length || 0;
-                // Use totalBreakDurationString if available, otherwise calculate from value
                 const durationStr = row.totalBreakDurationString;
                 const breakMinutes = Number(value) || 0;
                 const isFaded = fadedStatuses.includes(row.status?.toLowerCase());
 
-                // Treat "0S" or null/empty as "-"
                 if ((!durationStr || durationStr === "0S") && breakMinutes === 0 && breaksCount === 0) {
-                    return <span className={cn("text-foreground-tertiary", isFaded && "opacity-40")}>-</span>;
+                    return <span className={cn("text-foreground-tertiary text-xs", isFaded && "opacity-40")}>-</span>;
                 }
 
                 const displayStr = durationStr || (() => {
@@ -298,7 +292,7 @@ const EmployeeAttendanceDetail: React.FC = () => {
 
                 return (
                     <span className={cn(
-                        "font-bold text-foreground-secondary text-sm transition-opacity duration-300 uppercase",
+                        "font-medium text-xs text-foreground-secondary font-mono whitespace-nowrap py-0.5",
                         isFaded && "opacity-40"
                     )}>
                         {displayStr}
@@ -310,17 +304,15 @@ const EmployeeAttendanceDetail: React.FC = () => {
             _id: "punctuality",
             label: "Punctuality",
             format: (value: unknown, row: Attendance) => {
-                if (row.status !== "present") return <span className="text-foreground-tertiary opacity-40">-</span>;
-
-                // Be resilient: check punctuality string, root isLate, and sessions
-                const isLate = value === "Late" || row.isLate || (row.sessions && row.sessions.length > 0 && row.sessions.some(s => s.isLate));
+                if (row.status !== "present") return <span className="text-foreground-tertiary text-xs opacity-40">-</span>;
+                const isLate = value === "Late" || row.isLate || (row.sessions && row.sessions.length > 0 && (row.sessions.some(s => s.isLate)));
 
                 return isLate ? (
-                    <span className="px-3 py-1 bg-warning/10 text-warning border border-warning/20 rounded-full text-[10px] font-black uppercase tracking-widest">
+                    <span className="px-2 py-0.5 bg-warning/10 text-warning border border-warning/20 rounded-md text-[10px] font-bold uppercase tracking-wider whitespace-nowrap">
                         Late
                     </span>
                 ) : (
-                    <span className="px-3 py-1 bg-success/10 text-success border border-success/20 rounded-full text-[10px] font-black uppercase tracking-widest">
+                    <span className="px-2 py-0.5 bg-success/10 text-success border border-success/20 rounded-md text-[10px] font-bold uppercase tracking-wider whitespace-nowrap">
                         On Time
                     </span>
                 );
@@ -338,11 +330,11 @@ const EmployeeAttendanceDetail: React.FC = () => {
                     "half-day": "bg-blue-500/10 text-blue-600 border-blue-500/20",
                     "on-leave": "bg-purple-500/10 text-purple-600 border-purple-500/20",
                     holiday: "bg-amber-500/10 text-amber-600 border-amber-500/20",
-                    weekend: "bg-slate-500/10 text-slate-600 border-slate-500/20",
+                    weekend: "bg-slate-500/10 text-slate-500 border-slate-500/20",
                 };
                 return (
                     <span className={cn(
-                        "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",
+                        "px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border whitespace-nowrap",
                         variants[statusStr.toLowerCase()] || "bg-muted text-foreground-tertiary border-border"
                     )}>
                         {statusStr}
@@ -358,10 +350,10 @@ const EmployeeAttendanceDetail: React.FC = () => {
 
     if (!employee) {
         return (
-            <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
-                <AlertCircle className="w-12 h-12 text-error" />
-                <h2 className="text-xl font-bold">Employee not found</h2>
-                <Button onClick={() => navigate("/attendance")}>Back to Log</Button>
+            <div className="flex flex-col items-center justify-center min-h-[300px] gap-3">
+                <AlertCircle className="w-10 h-10 text-error" />
+                <h2 className="text-lg font-bold">Employee not found</h2>
+                <Button size="sm" onClick={() => navigate("/attendance")}>Back to Attendance</Button>
             </div>
         );
     }
@@ -377,7 +369,7 @@ const EmployeeAttendanceDetail: React.FC = () => {
             return [...acc, r];
         }, [])
         .map((r) => {
-            const isLate = r.punctuality === "Late" || r.isLate || (r.sessions && r.sessions.length > 0 && r.sessions.some(s => s.isLate));
+            const isLate = r.punctuality === "Late" || r.isLate || (r.sessions && r.sessions.length > 0 && (r.sessions.some(s => s.isLate)));
             return {
                 ...r,
                 _id: r._id || r.date,
@@ -386,44 +378,45 @@ const EmployeeAttendanceDetail: React.FC = () => {
         });
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-700 max-w-7xl mx-auto px-2 md:px-4">
+        <div className="space-y-4 animate-in fade-in duration-300 max-w-7xl mx-auto px-2 md:px-4 py-2">
             {/* Header section */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                <div className="space-y-4 w-full md:w-auto">
-                    <BackButton label="Back to Attendance Log" />
-                    <div>
-                        <h1 className="text-3xl sm:text-4xl font-black text-foreground tracking-tight flex items-center gap-4">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <div className="space-y-1">
+                    <div className="flex items-center gap-2.5">
+                        <BackButton label="Back to Attendance" />
+                        <span className="text-border">/</span>
+                        <h1 className="text-xl sm:text-2xl font-bold text-foreground tracking-tight flex items-center gap-2.5">
                             {employee.personalInfo?.firstName} {employee.personalInfo?.lastName}
-                            <span className="px-3 py-1 bg-primary/10 text-primary border border-primary/20 rounded-xl text-[10px] font-black uppercase tracking-widest">
-                                {employee.id || employee._id}
+                            <span className="px-2 py-0.5 bg-primary/10 text-primary border border-primary/20 rounded-md text-[10px] font-bold font-mono uppercase tracking-wider">
+                                {employee.employeeId || employee.id || employee._id}
                             </span>
                         </h1>
-                        <p className="text-foreground-tertiary font-medium flex items-center gap-2 mt-2">
-                            <Calendar className="w-4 h-4" />
-                            Showing attendance from <span className="text-foreground font-bold">{format(ymdToLocalDate(startDate), "MMM dd")}</span> to <span className="text-foreground font-bold">{format(ymdToLocalDate(endDate), "MMM dd, yyyy")}</span>
-                        </p>
                     </div>
+                    <p className="text-foreground-tertiary text-xs font-medium flex items-center gap-1.5 pl-0.5">
+                        <Calendar className="w-3.5 h-3.5 text-foreground-tertiary" />
+                        Showing <span className="text-foreground font-semibold">{format(ymdToLocalDate(startDate), "MMM dd")}</span> to <span className="text-foreground font-semibold">{format(ymdToLocalDate(endDate), "MMM dd, yyyy")}</span>
+                    </p>
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                <div className="flex items-center gap-3">
                     <TimezoneToggle variant="horizontal" />
                 </div>
             </div>
 
-            {/* Controls Card */}
-            <Card className="rounded-xl sm:rounded-xl border-border/50 shadow-2xl shadow-black/[0.03] overflow-hidden bg-surface">
-                <CardContent className="p-6 sm:p-8">
-                    <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-8">
+            {/* Controls Card (Compact Toolbar) */}
+            <Card className="rounded-xl border-border/40 shadow-xs overflow-hidden bg-surface">
+                <CardContent className="p-3 sm:p-3.5">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                         {/* Tabs */}
-                        <div className="flex p-1.5 bg-muted/50 rounded-2xl border border-border/50 gap-1">
+                        <div className="flex p-1 bg-muted/60 rounded-xl border border-border/40 gap-1">
                             {(["weekly", "monthly", "custom"] as const).map((type) => (
                                 <button
                                     key={type}
                                     onClick={() => handleFilterChange(type)}
                                     className={cn(
-                                        "px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+                                        "px-3.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
                                         filterType === type
-                                            ? "bg-surface text-primary shadow-sm border border-border/50"
+                                            ? "bg-surface text-primary shadow-xs border border-border/40"
                                             : "text-foreground-tertiary hover:text-foreground"
                                     )}
                                 >
@@ -434,41 +427,33 @@ const EmployeeAttendanceDetail: React.FC = () => {
 
                         {/* Custom Date Range Controls */}
                         {filterType === "custom" && (
-                            <div className="flex flex-col sm:flex-row items-center gap-4 animate-in slide-in-from-right-4 duration-300 w-full lg:w-auto">
-                                <div className="space-y-1 w-full sm:w-auto">
-                                    <p className="text-[10px] font-black text-foreground-tertiary uppercase tracking-widest ml-1">Start Date</p>
-                                    <Input
-                                        type="date"
-                                        value={startDate}
-                                        onChange={(e) => setStartDate(e.target.value)}
-                                        className="rounded-xl border-border/50 h-10 w-full sm:w-40"
-                                    />
-                                </div>
-                                <div className="sm:pt-5">
-                                    <ArrowRight className="w-4 h-4 text-foreground-tertiary hidden sm:block" />
-                                </div>
-                                <div className="space-y-1 w-full sm:w-auto">
-                                    <p className="text-[10px] font-black text-foreground-tertiary uppercase tracking-widest ml-1">End Date</p>
-                                    <Input
-                                        type="date"
-                                        value={endDate}
-                                        onChange={(e) => setEndDate(e.target.value)}
-                                        className="rounded-xl border-border/50 h-10 w-full sm:w-40"
-                                    />
-                                </div>
+                            <div className="flex items-center gap-2 animate-in slide-in-from-right-2 duration-200">
+                                <Input
+                                    type="date"
+                                    value={startDate}
+                                    onChange={(e) => setStartDate(e.target.value)}
+                                    className="rounded-lg border-border/50 h-8 text-xs w-36 px-2.5"
+                                />
+                                <ArrowRight className="w-3.5 h-3.5 text-foreground-tertiary" />
+                                <Input
+                                    type="date"
+                                    value={endDate}
+                                    onChange={(e) => setEndDate(e.target.value)}
+                                    className="rounded-lg border-border/50 h-8 text-xs w-36 px-2.5"
+                                />
                             </div>
                         )}
 
                         {/* Quick Summary View */}
-                        <div className="flex items-center gap-6 px-4 py-2 bg-muted/30 rounded-2xl border border-border/20 ml-auto lg:ml-0">
-                            <div>
-                                <p className="text-[9px] font-black text-foreground-tertiary uppercase tracking-tighter">Total Present</p>
-                                <p className="text-lg font-black text-success">{records.filter(r => r.status === 'present').length} Days</p>
+                        <div className="flex items-center gap-4 px-3 py-1.5 bg-muted/40 rounded-xl border border-border/40 ml-auto sm:ml-0">
+                            <div className="flex items-baseline gap-1.5">
+                                <span className="text-[10px] font-bold text-foreground-tertiary uppercase tracking-wider">Total Present:</span>
+                                <span className="text-xs font-extrabold text-success">{records.filter(r => r.status === 'present').length} Days</span>
                             </div>
-                            <div className="w-px h-8 bg-border/50" />
-                            <div>
-                                <p className="text-[9px] font-black text-foreground-tertiary uppercase tracking-tighter">Total Late</p>
-                                <p className="text-lg font-black text-warning">{records.filter(r => r.isLate).length}</p>
+                            <div className="w-px h-3.5 bg-border/60" />
+                            <div className="flex items-baseline gap-1.5">
+                                <span className="text-[10px] font-bold text-foreground-tertiary uppercase tracking-wider">Total Late:</span>
+                                <span className="text-xs font-extrabold text-warning">{records.filter(r => r.isLate).length}</span>
                             </div>
                         </div>
                     </div>
@@ -476,15 +461,16 @@ const EmployeeAttendanceDetail: React.FC = () => {
             </Card>
 
             {/* Table Card */}
-            <Card className="rounded-xl sm:rounded-xl border-border/40 shadow-2xl shadow-black/[0.03] overflow-hidden bg-surface">
-                <div className="relative min-h-[400px]">
+            <Card className="rounded-xl border-border/40 shadow-xs overflow-hidden bg-surface">
+                <div className="relative min-h-[300px]">
                     {isFetching && (
-                        <div className="absolute inset-0 bg-surface/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center gap-4 animate-in fade-in duration-300">
-                            <div className="w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
-                            <p className="text-[10px] font-black uppercase tracking-widest text-primary animate-pulse">Updating View...</p>
+                        <div className="absolute inset-0 bg-surface/40 backdrop-blur-[1px] z-20 flex flex-col items-center justify-center gap-2 animate-in fade-in duration-200">
+                            <div className="w-7 h-7 border-2 border-primary/20 border-t-primary rounded-full animate-spin" />
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-primary animate-pulse">Updating View...</p>
                         </div>
                     )}
                     <Table
+                        compact
                         columns={columns}
                         rows={records}
                         onRowClick={(row) => {
@@ -492,19 +478,18 @@ const EmployeeAttendanceDetail: React.FC = () => {
                             navigate(`/attendance/record/${encodeURIComponent(dateKey)}/${employeeId}`);
                         }}
                         isRowClickable={(row) => {
-                            // Clickable if there is any actual attendance data
                             return !!(row as Attendance).checkIn?.time || ((row as Attendance).sessions && (row as Attendance).sessions.length > 0);
                         }}
                         rowClassName={(row) => {
                             const isTodayRow = isToday(new Date(row.date));
-                            return isTodayRow ? "bg-primary/[0.04] border-l-4 border-l-primary shadow-sm z-10" : "";
+                            return isTodayRow ? "bg-primary/[0.04] border-l-3 border-l-primary shadow-xs z-10" : "";
                         }}
                         className="border-none"
                         emptyState={
                             <EmptyState
                                 title="No attendance history"
                                 description="No records found for the selected period."
-                                className="py-24"
+                                className="py-16"
                             />
                         }
                     />
@@ -512,10 +497,10 @@ const EmployeeAttendanceDetail: React.FC = () => {
             </Card>
 
             {/* Pagination Controls */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-2 sm:px-4">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-1 py-1">
                 {filterType !== 'weekly' && (
-                    <div className="flex items-center gap-3">
-                        <p className="text-xs sm:text-sm font-bold text-foreground-tertiary uppercase tracking-widest bg-muted/50 px-3 sm:px-4 py-2 rounded-2xl border border-border/30">
+                    <div className="flex items-center gap-2.5">
+                        <p className="text-xs font-bold text-foreground-tertiary uppercase tracking-wider bg-muted/40 px-3 py-1.5 rounded-lg border border-border/30">
                             Page <span className="text-primary">{page}</span> of {attendanceData?.totalPages || 1} (Total: {attendanceData?.total || 0})
                         </p>
                         <div className="relative group">
@@ -526,13 +511,7 @@ const EmployeeAttendanceDetail: React.FC = () => {
                                     setLimit(Number(v));
                                     setPage(1);
                                 }}
-                                className="
-                            h-9 px-3 rounded-xl border-border/50
-                            text-xs font-bold text-foreground-tertiary
-                            hover:text-foreground-tertiary
-                            focus:text-foreground-tertiary
-                            data-[state=open]:text-foreground-tertiary
-                            "
+                                className="h-8 px-2.5 rounded-lg border-border/50 text-xs font-bold text-foreground-tertiary"
                                 align="start"
                             />
                         </div>

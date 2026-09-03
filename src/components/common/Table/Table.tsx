@@ -19,6 +19,7 @@ interface TableProps<T> {
   tableClassName?: string;
   emptyState?: React.ReactNode;
   rowClassName?: (row: T) => string;
+  compact?: boolean;
 }
 
 const Table = <T,>({
@@ -31,6 +32,7 @@ const Table = <T,>({
   rowClassName,
   tableClassName,
   keyField = "_id",
+  compact = false,
 }: TableProps<T> & { keyField?: string }) => {
   return (
     <div
@@ -43,7 +45,7 @@ const Table = <T,>({
               <th
                 key={String(column._id)}
                 className={cn(
-                  "px-6 py-5 text-[11px] font-bold uppercase tracking-widest text-foreground-tertiary bg-muted/20 whitespace-nowrap",
+                  compact ? "px-4 py-2.5 text-[10px] font-bold uppercase tracking-wider text-foreground-tertiary bg-muted/30 whitespace-nowrap" : "px-6 py-5 text-[11px] font-bold uppercase tracking-widest text-foreground-tertiary bg-muted/20 whitespace-nowrap",
                   column.align === "right" ? "text-right" : column.align === "center" ? "text-center" : "text-left",
                   column.sticky && "sticky left-0 z-30 bg-surface border-r border-border/50 shadow-[4px_0_24px_-12px_rgba(0,0,0,0.1)]"
                 )}
