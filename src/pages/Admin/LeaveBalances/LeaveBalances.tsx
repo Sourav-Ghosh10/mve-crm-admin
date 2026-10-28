@@ -31,9 +31,38 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
         leaveTypeId: string;
         amount: string | number;
         hours: string | number;
+        recordedDate: string;
         description: string;
-    }>({ leaveTypeId: '', amount: '', hours: '', description: '' });
+    }>({ leaveTypeId: '', amount: '', hours: '', recordedDate: new Date().toISOString().split("T")[0], description: '' });
     const [isSavingModal, setIsSavingModal] = useState(false);
+
+    // Dynamic Accrual Preview state for Add Opening Balance
+    interface AccrualPreview {
+        isSameDate: boolean;
+        accruedDays: number;
+        accruedHours: number;
+        workingDays: number;
+        eligibleHours: number;
+        approvedUsed: number;
+        fromDate: string;
+        toDate: string;
+    }
+    const [accrualPreview, setAccrualPreview] = useState<AccrualPreview | null>(null);
+    const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+
+    const formatPreviewDate = (dateStr?: string) => {
+        if (!dateStr) return '';
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+            const [, m, d] = parts.map(Number);
+            const monthNames = [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'
+            ];
+            return `${d} ${monthNames[m - 1]}`;
+        }
+        return dateStr;
+    };
 
     // Modal state for Adjust Balance
     const [adjustModal, setAdjustModal] = useState<{
@@ -41,8 +70,11 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
         leaveType: LeaveBalanceDetails | null;
         days: string | number;
         hours: string | number;
-    }>({ isOpen: false, leaveType: null, days: '', hours: '' });
+        recordedDate: string;
+    }>({ isOpen: false, leaveType: null, days: '', hours: '', recordedDate: new Date().toISOString().split("T")[0] });
     const [isSavingAdjust, setIsSavingAdjust] = useState(false);
+    const [adjustAccrualPreview, setAdjustAccrualPreview] = useState<AccrualPreview | null>(null);
+    const [isLoadingAdjustPreview, setIsLoadingAdjustPreview] = useState(false);
 
     const getWorkingHoursPerDay = useCallback((leaveTypeId: string) => {
         if (!leaveTypeId) return 8;
@@ -91,7 +123,9 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
 
     const handleOpenModal = () => {
         setIsModalOpen(true);
-        setModalData({ leaveTypeId: '', amount: '', hours: '', description: '' });
+        setAccrualPreview(null);
+        setIsLoadingPreview(false);
+        setModalData({ leaveTypeId: '', amount: '', hours: '', recordedDate: new Date().toISOString().split("T")[0], description: '' });
     };
 
     const handleOpenAdjustModal = (type: LeaveBalanceDetails) => {
@@ -109,7 +143,10 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
             leaveType: type,
             days: Number(numDays.toFixed(4)),
             hours: currHours,
+            recordedDate: new Date().toISOString().split("T")[0]
         });
+        setAdjustAccrualPreview(null);
+        setIsLoadingAdjustPreview(false);
     };
 
     const handleSaveAdjust = async () => {
@@ -119,26 +156,32 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
             toast.error("Please enter a valid balance amount (0 or greater)");
             return;
         }
+        if (!adjustModal.recordedDate) {
+            toast.error("Please select the date when the balance was recorded");
+            return;
+        }
         try {
             setIsSavingAdjust(true);
             const uid = selectedUser._id || selectedUser.id;
             const leaveTypeName = adjustModal.leaveType.name;
             const leaveTypeId = adjustModal.leaveType.leaveTypeId || adjustModal.leaveType.code || leaveTypeName;
 
-            await Promise.allSettled([
-                leaveService.updateEmployeeBalance(uid, {
-                    [leaveTypeName]: numDays
-                }),
-                leaveService.addOpeningBalance({
-                    employeeId: uid,
-                    leaveType: leaveTypeId,
-                    amount: numDays,
-                    description: `Balance adjusted to ${numDays} days by Admin`
-                })
-            ]);
+            const res = await leaveService.addOpeningBalance({
+                employeeId: uid,
+                leaveType: leaveTypeId,
+                amount: numDays,
+                recordedDate: adjustModal.recordedDate,
+                description: `Balance adjusted to ${numDays} days as of ${adjustModal.recordedDate} by Admin`
+            });
 
-            toast.success(`Balance for ${leaveTypeName} updated to ${numDays} days (${Number((numDays * (adjustModal.leaveType.workingHoursPerDay || 8)).toFixed(2))} hours)!`);
-            setAdjustModal({ isOpen: false, leaveType: null, days: '', hours: '' });
+            if (res?.accruedAmount && res.accruedAmount > 0) {
+                toast.success(`Balance for ${leaveTypeName} updated to ${res.newBalance} days (${Number((res.newBalance * (adjustModal.leaveType.workingHoursPerDay || 8)).toFixed(2))} hours)! (Includes +${res.accruedAmount}d accrued)`);
+            } else {
+                toast.success(`Balance for ${leaveTypeName} updated to ${numDays} days (${Number((numDays * (adjustModal.leaveType.workingHoursPerDay || 8)).toFixed(2))} hours)!`);
+            }
+            setAdjustModal({ isOpen: false, leaveType: null, days: '', hours: '', recordedDate: new Date().toISOString().split("T")[0] });
+            setAdjustAccrualPreview(null);
+            setIsLoadingAdjustPreview(false);
             await loadBalances(selectedUser);
         } catch (err) {
             console.error("Failed to update balance:", err);
@@ -197,28 +240,31 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
             toast.error("Please fill in all required fields with a valid amount (0 or greater)");
             return;
         }
+        if (!modalData.recordedDate) {
+            toast.error("Please select the date when the balance was recorded");
+            return;
+        }
         try {
             setIsSavingModal(true);
             const uid = selectedUser._id || selectedUser.id;
-            const selectedTypeObj = leaveTypesForModal.find(t => (t._id || t.id || t.name) === modalData.leaveTypeId)
-                || detailedBalances.find(b => (b.leaveTypeId || b.code || b.name) === modalData.leaveTypeId);
-            const leaveTypeName = selectedTypeObj?.name || modalData.leaveTypeId;
 
-            await Promise.allSettled([
-                leaveService.addOpeningBalance({
-                    employeeId: uid,
-                    leaveType: modalData.leaveTypeId,
-                    amount: numericAmount,
-                    description: modalData.description || 'Opening balance manually added by Admin'
-                }),
-                leaveService.updateEmployeeBalance(uid, {
-                    [leaveTypeName]: numericAmount
-                })
-            ]);
+            const res = await leaveService.addOpeningBalance({
+                employeeId: uid,
+                leaveType: modalData.leaveTypeId,
+                amount: numericAmount,
+                recordedDate: modalData.recordedDate,
+                description: modalData.description || 'Opening balance manually added by Admin'
+            });
 
-            toast.success("Opening balance and available balance updated successfully!");
+            if (res?.accruedAmount && res.accruedAmount > 0) {
+                toast.success(`Opening balance saved! Added ${res.accruedAmount} days of eligible accrued leave.`);
+            } else {
+                toast.success("Opening balance updated successfully!");
+            }
             setIsModalOpen(false);
-            setModalData({ leaveTypeId: '', amount: '', hours: '', description: '' });
+            setAccrualPreview(null);
+            setIsLoadingPreview(false);
+            setModalData({ leaveTypeId: '', amount: '', hours: '', recordedDate: new Date().toISOString().split("T")[0], description: '' });
             await loadBalances(selectedUser);
         } catch (err) {
             console.error("Failed to add opening balance:", err);
@@ -227,6 +273,129 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
             setIsSavingModal(false);
         }
     };
+
+    // Automatically calculate dynamic accrual preview whenever recordedDate or leaveType changes
+    useEffect(() => {
+        if (!isModalOpen) {
+            setAccrualPreview(null);
+            setIsLoadingPreview(false);
+            return;
+        }
+
+        const todayStr = new Date().toISOString().split("T")[0];
+        const recDate = modalData.recordedDate;
+        const uid = selectedUser?._id || selectedUser?.id;
+
+        // If date is same or empty or in future, or leave type not selected yet: no need to calculate
+        if (!recDate || recDate === todayStr || recDate > todayStr || !modalData.leaveTypeId || !uid) {
+            setAccrualPreview(null);
+            setIsLoadingPreview(false);
+            return;
+        }
+
+        let isMounted = true;
+        const fetchPreview = async () => {
+            try {
+                setIsLoadingPreview(true);
+                const data = await leaveService.getOpeningBalancePreview({
+                    employeeId: uid,
+                    leaveTypeId: modalData.leaveTypeId,
+                    recordedDate: recDate
+                });
+                if (isMounted) {
+                    setAccrualPreview(data);
+                }
+            } catch (err) {
+                console.warn("Failed to fetch balance preview:", err);
+                if (isMounted) {
+                    setAccrualPreview(null);
+                }
+            } finally {
+                if (isMounted) {
+                    setIsLoadingPreview(false);
+                }
+            }
+        };
+
+        const timer = setTimeout(fetchPreview, 150);
+        return () => {
+            isMounted = false;
+            clearTimeout(timer);
+        };
+    }, [isModalOpen, modalData.recordedDate, modalData.leaveTypeId, selectedUser]);
+
+    // Automatically calculate dynamic accrual preview whenever recordedDate changes in Adjust modal
+    useEffect(() => {
+        if (!adjustModal.isOpen || !adjustModal.leaveType) {
+            setAdjustAccrualPreview(null);
+            setIsLoadingAdjustPreview(false);
+            return;
+        }
+
+        const todayStr = new Date().toISOString().split("T")[0];
+        const recDate = adjustModal.recordedDate;
+        const uid = selectedUser?._id || selectedUser?.id;
+        const leaveTypeId = adjustModal.leaveType.leaveTypeId || adjustModal.leaveType.code || adjustModal.leaveType.name;
+
+        // If date is same or empty or in future, or leave type / uid missing: no need to calculate
+        if (!recDate || recDate === todayStr || recDate > todayStr || !leaveTypeId || !uid) {
+            setAdjustAccrualPreview(null);
+            setIsLoadingAdjustPreview(false);
+            return;
+        }
+
+        let isMounted = true;
+        const fetchPreview = async () => {
+            try {
+                setIsLoadingAdjustPreview(true);
+                const data = await leaveService.getOpeningBalancePreview({
+                    employeeId: uid,
+                    leaveTypeId: leaveTypeId,
+                    recordedDate: recDate
+                });
+                if (isMounted) {
+                    setAdjustAccrualPreview(data);
+                }
+            } catch (err) {
+                console.warn("Failed to fetch adjust balance preview:", err);
+                if (isMounted) {
+                    setAdjustAccrualPreview(null);
+                }
+            } finally {
+                if (isMounted) {
+                    setIsLoadingAdjustPreview(false);
+                }
+            }
+        };
+
+        const timer = setTimeout(fetchPreview, 150);
+        return () => {
+            isMounted = false;
+            clearTimeout(timer);
+        };
+    }, [adjustModal.isOpen, adjustModal.recordedDate, adjustModal.leaveType, selectedUser]);
+
+    // Dynamic calculation for Total Leave Balance (opening balance + accrued leave)
+    const modalRate = getWorkingHoursPerDay(modalData.leaveTypeId);
+    const numOpeningDays = (modalData.amount !== '' && !isNaN(Number(modalData.amount))) ? Number(modalData.amount) : 0;
+    const numOpeningHours = (modalData.hours !== '' && !isNaN(Number(modalData.hours))) 
+        ? Number(modalData.hours) 
+        : (modalRate > 0 ? Number((numOpeningDays * modalRate).toFixed(2)) : 0);
+    const accruedDays = (accrualPreview && !accrualPreview.isSameDate) ? (accrualPreview.accruedDays || 0) : 0;
+    const accruedHours = (accrualPreview && !accrualPreview.isSameDate) ? (accrualPreview.accruedHours || 0) : 0;
+    const totalDays = Number((numOpeningDays + accruedDays).toFixed(4));
+    const totalHours = Number((numOpeningHours + accruedHours).toFixed(2));
+
+    // Dynamic calculation for Adjust Modal Total Leave Balance (opening balance + accrued leave)
+    const adjustRate = adjustModal.leaveType?.workingHoursPerDay || 8;
+    const adjustOpeningDays = (adjustModal.days !== '' && !isNaN(Number(adjustModal.days))) ? Number(adjustModal.days) : 0;
+    const adjustOpeningHours = (adjustModal.hours !== '' && !isNaN(Number(adjustModal.hours)))
+        ? Number(adjustModal.hours)
+        : (adjustRate > 0 ? Number((adjustOpeningDays * adjustRate).toFixed(2)) : 0);
+    const adjustAccruedDays = (adjustAccrualPreview && !adjustAccrualPreview.isSameDate) ? (adjustAccrualPreview.accruedDays || 0) : 0;
+    const adjustAccruedHours = (adjustAccrualPreview && !adjustAccrualPreview.isSameDate) ? (adjustAccrualPreview.accruedHours || 0) : 0;
+    const adjustTotalDays = Number((adjustOpeningDays + adjustAccruedDays).toFixed(4));
+    const adjustTotalHours = Number((adjustOpeningHours + adjustAccruedHours).toFixed(2));
 
     if (loading) {
         return (
@@ -430,6 +599,50 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                             options={modalOptions}
                             placeholder="Select Leave Type"
                         />
+                        <Input
+                            type="date"
+                            label="Recorded Date"
+                            required
+                            value={modalData.recordedDate}
+                            max={new Date().toISOString().split("T")[0]}
+                            onChange={(e) => setModalData(prev => ({ ...prev, recordedDate: e.target.value }))}
+                            helperText="Date when balance was recorded in previous HRM system"
+                        />
+
+                        {/* Dynamic Accrued Leave Preview */}
+                        {isLoadingPreview && (
+                            <div className="p-3.5 rounded-2xl bg-primary/5 border border-primary/20 flex items-center gap-2.5 text-xs text-primary animate-pulse">
+                                <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin flex-shrink-0" />
+                                <span className="font-semibold">Calculating eligible leave accrued from {formatPreviewDate(modalData.recordedDate)} to {formatPreviewDate(new Date().toISOString().split("T")[0])}...</span>
+                            </div>
+                        )}
+
+                        {!isLoadingPreview && accrualPreview && !accrualPreview.isSameDate && (
+                            <div className="p-3.5 rounded-2xl bg-primary/5 border border-primary/20 space-y-2 transition-all">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                                        <span className="text-xs font-bold text-foreground">
+                                            Leave balance from <span className="text-primary font-black">{formatPreviewDate(accrualPreview.fromDate)}</span> to <span className="text-primary font-black">{formatPreviewDate(accrualPreview.toDate)}</span>
+                                        </span>
+                                    </div>
+                                    <span className="shrink-0 whitespace-nowrap text-xs font-black text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-xl">
+                                        +{accrualPreview.accruedDays} Days ({accrualPreview.accruedHours}h)
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[11px] text-foreground-tertiary pt-1.5 border-t border-border/40">
+                                    <span>
+                                        Accrued across <strong className="text-foreground font-semibold">{accrualPreview.workingDays} working days</strong> ({accrualPreview.eligibleHours}h eligible) under leave policy
+                                    </span>
+                                    {accrualPreview.approvedUsed > 0 && (
+                                        <span className="text-amber-600 font-semibold shrink-0 ml-2">
+                                            -{accrualPreview.approvedUsed}d approved
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <Input
                                 type="number"
@@ -465,6 +678,31 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                                 ⚡ Set to 0 Hours (0 Days)
                             </Button>
                         </div>
+                        <div>
+                            <div className="flex items-center justify-between mb-1.5 px-1">
+                                <label className="block text-[10px] sm:text-[11px] font-black text-foreground-tertiary uppercase tracking-widest">
+                                    Total Leave Balance
+                                </label>
+                                {accrualPreview && !accrualPreview.isSameDate && (
+                                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                                        Opening + Accrued
+                                    </span>
+                                )}
+                            </div>
+                            <div className="w-full px-3.5 sm:px-5 py-2.5 sm:py-3.5 border border-border rounded-xl sm:rounded-[1.25rem] bg-surface/50 backdrop-blur-md flex items-center justify-between">
+                                <span className="text-sm font-black text-foreground">
+                                    {totalDays} Days ({totalHours} Hours)
+                                </span>
+                                <span className="text-[11px] font-semibold text-foreground-tertiary">
+                                    1 Day = {modalRate} Hours
+                                </span>
+                            </div>
+                            <p className="text-[10px] text-foreground-tertiary mt-1.5 px-1">
+                                {accrualPreview && !accrualPreview.isSameDate
+                                    ? `Includes ${numOpeningHours}h opening balance + ${accruedHours}h accrued leave`
+                                    : `Total calculated balance (1 Day = ${modalRate} Hours)`}
+                            </p>
+                        </div>
                         <TextArea
                             label="Description (Optional)"
                             value={modalData.description}
@@ -480,11 +718,19 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
             {adjustModal.isOpen && adjustModal.leaveType && (
                 <Modal
                     open={adjustModal.isOpen}
-                    onClose={() => setAdjustModal({ isOpen: false, leaveType: null, days: '', hours: '' })}
+                    onClose={() => {
+                        setAdjustModal({ isOpen: false, leaveType: null, days: '', hours: '', recordedDate: new Date().toISOString().split("T")[0] });
+                        setAdjustAccrualPreview(null);
+                        setIsLoadingAdjustPreview(false);
+                    }}
                     title={`Adjust Balance: ${adjustModal.leaveType.name}`}
                     actions={
                         <div className="flex gap-2 w-full justify-end">
-                            <Button variant="outline" onClick={() => setAdjustModal({ isOpen: false, leaveType: null, days: '', hours: '' })}>
+                            <Button variant="outline" onClick={() => {
+                                setAdjustModal({ isOpen: false, leaveType: null, days: '', hours: '', recordedDate: new Date().toISOString().split("T")[0] });
+                                setAdjustAccrualPreview(null);
+                                setIsLoadingAdjustPreview(false);
+                            }}>
                                 Cancel
                             </Button>
                             <Button onClick={handleSaveAdjust} isLoading={isSavingAdjust}>
@@ -506,6 +752,50 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                                 </span>
                             </div>
                         </div>
+
+                        <Input
+                            type="date"
+                            label="Recorded Date"
+                            required
+                            value={adjustModal.recordedDate}
+                            max={new Date().toISOString().split("T")[0]}
+                            onChange={(e) => setAdjustModal(prev => ({ ...prev, recordedDate: e.target.value }))}
+                            helperText="Date when balance was recorded in previous HRM system"
+                        />
+
+                        {/* Dynamic Accrued Leave Preview */}
+                        {isLoadingAdjustPreview && (
+                            <div className="p-3.5 rounded-2xl bg-primary/5 border border-primary/20 flex items-center gap-2.5 text-xs text-primary animate-pulse">
+                                <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin flex-shrink-0" />
+                                <span className="font-semibold">Calculating eligible leave accrued from {formatPreviewDate(adjustModal.recordedDate)} to {formatPreviewDate(new Date().toISOString().split("T")[0])}...</span>
+                            </div>
+                        )}
+
+                        {!isLoadingAdjustPreview && adjustAccrualPreview && !adjustAccrualPreview.isSameDate && (
+                            <div className="p-3.5 rounded-2xl bg-primary/5 border border-primary/20 space-y-2 transition-all">
+                                <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                        <div className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                                        <span className="text-xs font-bold text-foreground">
+                                            Leave balance from <span className="text-primary font-black">{formatPreviewDate(adjustAccrualPreview.fromDate)}</span> to <span className="text-primary font-black">{formatPreviewDate(adjustAccrualPreview.toDate)}</span>
+                                        </span>
+                                    </div>
+                                    <span className="shrink-0 whitespace-nowrap text-xs font-black text-primary bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-xl">
+                                        +{adjustAccrualPreview.accruedDays} Days ({adjustAccrualPreview.accruedHours}h)
+                                    </span>
+                                </div>
+                                <div className="flex items-center justify-between text-[11px] text-foreground-tertiary pt-1.5 border-t border-border/40">
+                                    <span>
+                                        Accrued across <strong className="text-foreground font-semibold">{adjustAccrualPreview.workingDays} working days</strong> ({adjustAccrualPreview.eligibleHours}h eligible) under leave policy
+                                    </span>
+                                    {adjustAccrualPreview.approvedUsed > 0 && (
+                                        <span className="text-amber-600 font-semibold shrink-0 ml-2">
+                                            -{adjustAccrualPreview.approvedUsed}d approved
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        )}
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <Input
@@ -569,6 +859,32 @@ const LeaveBalancesDetail: React.FC<{ userId: string }> = ({ userId }) => {
                             >
                                 ⚡ Set to 0 Hours (0 Days)
                             </Button>
+                        </div>
+
+                        <div>
+                            <div className="flex items-center justify-between mb-1.5 px-1">
+                                <label className="block text-[10px] sm:text-[11px] font-black text-foreground-tertiary uppercase tracking-widest">
+                                    Total Leave Balance
+                                </label>
+                                {adjustAccrualPreview && !adjustAccrualPreview.isSameDate && (
+                                    <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                                        Opening + Accrued
+                                    </span>
+                                )}
+                            </div>
+                            <div className="w-full px-3.5 sm:px-5 py-2.5 sm:py-3.5 border border-border rounded-xl sm:rounded-[1.25rem] bg-surface/50 backdrop-blur-md flex items-center justify-between">
+                                <span className="text-sm font-black text-foreground">
+                                    {adjustTotalDays} Days ({adjustTotalHours} Hours)
+                                </span>
+                                <span className="text-[11px] font-semibold text-foreground-tertiary">
+                                    1 Day = {adjustRate} Hours
+                                </span>
+                            </div>
+                            <p className="text-[10px] text-foreground-tertiary mt-1.5 px-1">
+                                {adjustAccrualPreview && !adjustAccrualPreview.isSameDate
+                                    ? `Includes ${adjustOpeningHours}h opening balance + ${adjustAccruedHours}h accrued leave`
+                                    : `Total calculated balance (1 Day = ${adjustRate} Hours)`}
+                            </p>
                         </div>
                     </div>
                 </Modal>

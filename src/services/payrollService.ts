@@ -34,7 +34,25 @@ export interface SalaryConfig {
   monthlyCTC: number;
   effectiveFrom: string;
   isActive: boolean;
+  revisionReason?: string;
+  scheduledRevision?: { ctc: number; date: string; reason?: string };
   items: SalaryConfigItem[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SalaryRevision {
+  _id: string;
+  employeeId: string | User;
+  salaryConfigId?: string;
+  oldCTC: number;
+  revisedCTC: number;
+  effectiveDate: string;
+  revisionReason: string;
+  status: 'PREVIOUS' | 'CURRENT' | 'SCHEDULED';
+  items?: SalaryConfigItem[];
+  revisedBy?: User;
+  isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -165,6 +183,22 @@ const payrollService = {
 
   deleteSalaryConfig: async (id: string) => {
     const response = await api.delete<{ success: boolean; message: string }>(`/payroll/salary-configs/${id}`);
+    return response.data;
+  },
+
+  // Salary Revisions
+  getSalaryRevisions: async (employeeId: string) => {
+    const response = await api.get<{ success: boolean; data: SalaryRevision[] }>(`/payroll/salary-configs/revisions/${employeeId}`);
+    return response.data;
+  },
+
+  createSalaryRevision: async (data: any) => {
+    const response = await api.post<{ success: boolean; data: SalaryRevision }>('/payroll/salary-configs/revisions', data);
+    return response.data;
+  },
+
+  cancelSalaryRevision: async (id: string) => {
+    const response = await api.delete<{ success: boolean; message: string }>(`/payroll/salary-configs/revisions/${id}`);
     return response.data;
   },
 

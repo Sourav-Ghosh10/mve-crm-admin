@@ -17,6 +17,7 @@ import {
   User as UserIcon,
   Plus,
   Check,
+  FileText,
 } from "lucide-react";
 import { cn } from "../../../lib/utils";
 
@@ -24,6 +25,7 @@ const schema = z.object({
   employeeId: z.string().min(1, "Employee is required"),
   monthlyCTC: z.number().min(0, "Monthly CTC must be positive"),
   effectiveFrom: z.string().min(1, "Effective date is required"),
+  revisionReason: z.string().optional(),
   isActive: z.boolean().optional(),
   items: z.array(
     z.object({
@@ -74,6 +76,7 @@ const SalaryConfigForm: React.FC<SalaryConfigFormProps> = ({
       effectiveFrom: initialValues?.effectiveFrom
         ? new Date(initialValues.effectiveFrom).toISOString().split("T")[0]
         : new Date().toISOString().split("T")[0],
+      revisionReason: initialValues?.revisionReason || "",
       isActive: initialValues?.isActive ?? true,
       items:
         initialValues?.items?.map((i) => ({
@@ -105,6 +108,7 @@ const SalaryConfigForm: React.FC<SalaryConfigFormProps> = ({
       effectiveFrom: initialValues?.effectiveFrom
         ? new Date(initialValues.effectiveFrom).toISOString().split("T")[0]
         : new Date().toISOString().split("T")[0],
+      revisionReason: initialValues?.revisionReason || "",
       isActive: initialValues?.isActive ?? true,
       items:
         initialValues?.items?.map((i) => ({
@@ -223,7 +227,17 @@ const SalaryConfigForm: React.FC<SalaryConfigFormProps> = ({
           required
         />
 
-        <div className="flex items-center gap-4 h-full pt-6">
+        <Input
+          label="Revision Reason"
+          type="text"
+          placeholder="e.g. Annual Appraisal, Promotion, Market Adjustment"
+          {...register("revisionReason")}
+          error={!!errors.revisionReason}
+          helperText={errors.revisionReason?.message || "Reason logged in the salary history audit."}
+          startAdornment={<FileText className="w-4 h-4" />}
+        />
+
+        <div className="flex items-center gap-4 h-full pt-2">
           <label className="flex items-center gap-3 cursor-pointer group">
             <div className="relative">
               <input
@@ -240,6 +254,15 @@ const SalaryConfigForm: React.FC<SalaryConfigFormProps> = ({
           </label>
         </div>
       </div>
+
+      {watch("effectiveFrom") && new Date(watch("effectiveFrom")).setHours(0, 0, 0, 0) > new Date().setHours(0, 0, 0, 0) && (
+        <div className="p-3.5 rounded-2xl bg-primary/5 border border-primary/20 flex items-center gap-3 text-xs text-primary font-bold animate-in fade-in">
+          <Calendar className="w-4 h-4 flex-shrink-0" />
+          <span>
+            Scheduled Hike: This revision will automatically become active on {new Date(watch("effectiveFrom")).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}. The current salary stays active until then.
+          </span>
+        </div>
+      )}
 
       <div className="space-y-4 pt-4">
         <div className="flex items-center justify-between px-1">
@@ -366,7 +389,11 @@ const SalaryConfigForm: React.FC<SalaryConfigFormProps> = ({
           Cancel
         </Button>
         <Button type="submit" isLoading={isLoading}>
-          {initialValues?._id ? "Update Configuration" : "Save Configuration"}
+          {watch("effectiveFrom") && new Date(watch("effectiveFrom")).setHours(0, 0, 0, 0) > new Date().setHours(0, 0, 0, 0)
+            ? "Schedule Revision"
+            : initialValues?._id
+            ? "Update Configuration"
+            : "Save Configuration"}
         </Button>
       </div>
     </form>

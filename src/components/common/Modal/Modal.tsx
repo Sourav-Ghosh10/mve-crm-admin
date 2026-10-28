@@ -38,6 +38,7 @@ interface ModalProps {
   title: string;
   children: ReactNode;
   actions?: ReactNode;
+  headerRight?: ReactNode;
   maxWidth?: "xs" | "sm" | "md" | "lg" | "xl";
   preventCloseOnClickOutside?: boolean;
   hideHeader?: boolean;
@@ -58,6 +59,7 @@ const Modal: React.FC<ModalProps> = ({
   title,
   children,
   actions,
+  headerRight,
   maxWidth = "sm",
   preventCloseOnClickOutside = true,
   hideHeader = false,
@@ -100,22 +102,25 @@ const Modal: React.FC<ModalProps> = ({
 
           {/* Header */}
           {!hideHeader && (
-            <div className="flex items-center justify-between px-6 py-5 border-b border-border/50 bg-muted/20">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-border/50 bg-muted/20 gap-4">
               <h2
                 id="modal-title"
-                className="text-lg sm:text-xl font-black text-foreground uppercase tracking-tight pr-2"
+                className="text-lg sm:text-xl font-black text-foreground uppercase tracking-tight pr-2 truncate"
               >
                 {title}
               </h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onClose}
-                className="p-2 rounded-2xl text-foreground-secondary hover:text-error hover:bg-error/10 transition-all duration-300 flex-shrink-0"
-                aria-label="Close modal"
-              >
-                <X className="w-5 h-5" />
-              </Button>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                {headerRight}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onClose}
+                  className="p-2 rounded-2xl text-foreground-secondary hover:text-error hover:bg-error/10 transition-all duration-300 flex-shrink-0"
+                  aria-label="Close modal"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
             </div>
           )}
 

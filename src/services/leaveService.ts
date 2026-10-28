@@ -108,8 +108,14 @@ export const leaveService = {
   },
 
   // Add opening balance (Admin)
-  addOpeningBalance: async (data: { employeeId: string; leaveType: string; amount: number; description?: string }) => {
+  addOpeningBalance: async (data: { employeeId: string; leaveType: string; amount: number; recordedDate?: string; description?: string }) => {
     const response = await api.post('/leave-requests/opening-balance', data);
+    return response.data.data;
+  },
+
+  // Get opening balance preview (Admin)
+  getOpeningBalancePreview: async (params: { employeeId: string; leaveTypeId: string; recordedDate: string }) => {
+    const response = await api.get('/leave-requests/opening-balance-preview', { params });
     return response.data.data;
   }
 };

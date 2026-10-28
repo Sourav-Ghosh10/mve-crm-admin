@@ -7,6 +7,7 @@ import {
   CreditCard,
   History,
   Search,
+  Clock,
 } from "lucide-react";
 import { cn } from "../../../lib/utils";
 import Button from "../../../components/common/Button";
@@ -20,6 +21,7 @@ import EmptyState from "../../../components/common/EmptyState/EmptyState";
 import { useConfirmation } from "../../../hooks/useConfirmation";
 import Modal from "../../../components/common/Modal/Modal";
 import SalaryConfigForm from "./SalaryConfigForm";
+import SalaryRevisionHistory from "./SalaryRevisionHistory";
 import BulkSalarySetupModal from "./BulkSalarySetupModal";
 import FilterDropdown from "../../../components/common/Filter/FilterDropdown";
 import Pagination from "../../../components/common/Pagination";
@@ -43,6 +45,7 @@ const SalaryConfigList: React.FC = () => {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalTab, setModalTab] = useState<"config" | "history">("config");
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [currentConfig, setCurrentConfig] =
     useState<Partial<SalaryConfig> | null>(null);
@@ -63,18 +66,57 @@ const SalaryConfigList: React.FC = () => {
         payrollService.getSalaryConfigs({ limit: 100 }),
       ]);
 
-      const configsMap = new Map<string, SalaryConfig>();
+      // Group configs by employee to determine current active config vs future scheduled revision
+      const empConfigsMap = new Map<string, SalaryConfig[]>();
       configRes.data.forEach((c) => {
         const empId =
           typeof c.employeeId === "object"
             ? (c.employeeId as any)?._id
             : c.employeeId;
         if (empId) {
-          const existing = configsMap.get(empId.toString());
-          // Map the config, preferring the active one if multiple exist
-          if (!existing || (!existing.isActive && c.isActive)) {
-            configsMap.set(empId.toString(), c);
-          }
+          const list = empConfigsMap.get(empId.toString()) || [];
+          list.push(c);
+          empConfigsMap.set(empId.toString(), list);
+        }
+      });
+
+      const now = new Date();
+      const configsMap = new Map<string, SalaryConfig>();
+
+      empConfigsMap.forEach((configs, empIdStr) => {
+        const activeConfigs = configs.filter((c) => c.isActive);
+
+        // Find configs effective on or before today (ordered newest first)
+        const effectiveNowOrPast = activeConfigs.filter(
+          (c) => new Date(c.effectiveFrom) <= now
+        );
+        effectiveNowOrPast.sort(
+          (a, b) => new Date(b.effectiveFrom).getTime() - new Date(a.effectiveFrom).getTime()
+        );
+
+        // Find upcoming scheduled revisions (ordered earliest upcoming first)
+        const futureConfigs = activeConfigs.filter(
+          (c) => new Date(c.effectiveFrom) > now
+        );
+        futureConfigs.sort(
+          (a, b) => new Date(a.effectiveFrom).getTime() - new Date(b.effectiveFrom).getTime()
+        );
+
+        // Active config for current payroll is the newest one effective today or in past
+        const chosenConfig = effectiveNowOrPast[0] || futureConfigs[0] || configs[0];
+
+        if (chosenConfig) {
+          const scheduled = futureConfigs[0];
+          configsMap.set(empIdStr, {
+            ...chosenConfig,
+            scheduledRevision: scheduled
+              ? {
+                  ctc: scheduled.monthlyCTC,
+                  date: scheduled.effectiveFrom,
+                  reason: scheduled.revisionReason,
+                }
+              : undefined,
+          });
         }
       });
 
@@ -178,12 +220,14 @@ const SalaryConfigList: React.FC = () => {
 
   const handleAdd = (employeeId?: string) => {
     setCurrentConfig({ isActive: true, employeeId: employeeId as any });
+    setModalTab("config");
     setFormError(null);
     setIsModalOpen(true);
   };
 
   const handleEdit = (config: SalaryConfig) => {
     setCurrentConfig(config);
+    setModalTab("config");
     setFormError(null);
     setIsModalOpen(true);
   };
@@ -192,17 +236,22 @@ const SalaryConfigList: React.FC = () => {
     try {
       setIsFormLoading(true);
       setFormError(null);
-      if (currentConfig?._id) {
+      if (currentConfig?._id && !currentConfig._id.startsWith("empty-")) {
         // The employee is immutable for an existing configuration. The update
         // validator intentionally does not accept employeeId, so do not send it.
         await payrollService.updateSalaryConfig(currentConfig._id, {
           monthlyCTC: data.monthlyCTC,
           effectiveFrom: data.effectiveFrom,
+          revisionReason: data.revisionReason,
           isActive: data.isActive,
           items: data.items?.filter((item: any) => item.masterId),
         });
       } else {
-        await payrollService.createSalaryConfig({ ...data, items: data.items?.filter((item: any) => item.masterId) });
+        await payrollService.createSalaryConfig({
+          ...data,
+          revisionReason: data.revisionReason,
+          items: data.items?.filter((item: any) => item.masterId),
+        });
       }
       setIsModalOpen(false);
       fetchConfigs();
@@ -277,11 +326,20 @@ const SalaryConfigList: React.FC = () => {
         }
         const displayVal = val || row.basicSalary || 0;
         return (
-          <div className="flex items-center gap-2">
-            <CreditCard className="w-4 h-4 text-success" />
-            <span className="font-black text-foreground text-lg">
-              ₹{displayVal.toLocaleString()}
-            </span>
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <CreditCard className="w-4 h-4 text-success" />
+              <span className="font-black text-foreground text-lg">
+                ₹{displayVal.toLocaleString()}
+              </span>
+            </div>
+            {row.scheduledRevision && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-primary/10 text-primary border border-primary/20 text-[9px] font-black uppercase tracking-wider w-fit animate-in fade-in">
+                <Clock className="w-3 h-3" />
+                Scheduled: ₹{row.scheduledRevision.ctc.toLocaleString()} from{" "}
+                {format(new Date(row.scheduledRevision.date), "dd MMM yyyy")}
+              </div>
+            )}
           </div>
         );
       },
@@ -391,6 +449,18 @@ const SalaryConfigList: React.FC = () => {
         }
         return (
           <div className="flex items-center justify-end gap-2">
+            <button
+              onClick={() => {
+                setCurrentConfig(row);
+                setModalTab("history");
+                setFormError(null);
+                setIsModalOpen(true);
+              }}
+              className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-primary/10 hover:text-primary text-foreground-secondary transition-all"
+              title="View Revision History"
+            >
+              <History className="w-4 h-4" />
+            </button>
             <button
               onClick={() => handleEdit(row)}
               className="w-9 h-9 flex items-center justify-center rounded-xl hover:bg-primary/10 hover:text-primary text-foreground-secondary transition-all"
@@ -520,19 +590,79 @@ const SalaryConfigList: React.FC = () => {
         open={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         title={
-          currentConfig?._id
+          modalTab === "history"
+            ? "Salary Revision History"
+            : currentConfig?._id && !currentConfig._id.startsWith("empty-")
             ? "Edit Salary Configuration"
             : "New Salary Configuration"
         }
         maxWidth="xl"
+        headerRight={
+          currentConfig && !(currentConfig as any).isVirtual ? (
+            <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-muted/60 border border-border/40 backdrop-blur-sm shadow-sm">
+              <button
+                type="button"
+                id="tab-edit-config"
+                onClick={() => setModalTab("config")}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-300",
+                  modalTab === "config"
+                    ? "bg-surface shadow-md text-primary border border-border/60"
+                    : "text-foreground-tertiary hover:text-foreground hover:bg-surface/50"
+                )}
+              >
+                <CreditCard className="w-3.5 h-3.5" />
+                Configuration
+              </button>
+              <button
+                type="button"
+                id="tab-salary-history"
+                onClick={() => setModalTab("history")}
+                className={cn(
+                  "flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all duration-300",
+                  modalTab === "history"
+                    ? "bg-surface shadow-md text-primary border border-border/60"
+                    : "text-foreground-tertiary hover:text-foreground hover:bg-surface/50"
+                )}
+              >
+                <History className="w-3.5 h-3.5" />
+                History
+                {currentConfig.scheduledRevision && (
+                  <span className="w-2 h-2 rounded-full bg-primary animate-ping" />
+                )}
+              </button>
+            </div>
+          ) : null
+        }
       >
-        <SalaryConfigForm
-          initialValues={currentConfig || {}}
-          onSubmit={handleFormSubmit}
-          onCancel={() => setIsModalOpen(false)}
-          isLoading={isFormLoading}
-          error={formError}
-        />
+        {modalTab === "history" && currentConfig ? (
+          <SalaryRevisionHistory
+            employeeId={
+              typeof currentConfig.employeeId === "object"
+                ? (currentConfig.employeeId as any)?._id
+                : (currentConfig.employeeId as string)
+            }
+            employeeName={
+              typeof currentConfig.employeeId === "object"
+                ? `${(currentConfig.employeeId as any).personalInfo?.firstName || ""} ${(currentConfig.employeeId as any).personalInfo?.lastName || ""}`
+                : undefined
+            }
+            employeeCode={
+              typeof currentConfig.employeeId === "object"
+                ? (currentConfig.employeeId as any).employeeId
+                : undefined
+            }
+            onSwitchToConfig={() => setModalTab("config")}
+          />
+        ) : (
+          <SalaryConfigForm
+            initialValues={currentConfig || {}}
+            onSubmit={handleFormSubmit}
+            onCancel={() => setIsModalOpen(false)}
+            isLoading={isFormLoading}
+            error={formError}
+          />
+        )}
       </Modal>
 
       <Modal
